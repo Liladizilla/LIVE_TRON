@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: LIVE_TRON API
+  version: 0.1.0
+  description: Initial application API foundation. Media ingest and playback are not implemented.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Process liveness
+      responses:
+        "200":
+          description: API process is running
+  /readyz:
+    get:
+      summary: Dependency readiness
+      responses:
+        "200":
+          description: PostgreSQL is reachable
+        "503":
+          description: PostgreSQL is not configured or unavailable
+  /v1:
+    get:
+      summary: API capability metadata
+      responses:
+        "200":
+          description: API metadata; does not imply media-plane availability
