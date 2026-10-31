@@ -1,6 +1,6 @@
+use crate::state::AppState;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;
-use crate::state::AppState;
 
 pub async fn healthz() -> impl IntoResponse {
     Json(json!({
@@ -23,7 +23,10 @@ pub async fn readyz(
         );
     };
 
-    match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&pool).await {
+    match sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&pool)
+        .await
+    {
         Ok(_) => (
             StatusCode::OK,
             Json(json!({
