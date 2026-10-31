@@ -4,6 +4,7 @@ use std::{path::Path, time::Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL")
         .context("DATABASE_URL is required to run migrations")?;
     let migrations_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
