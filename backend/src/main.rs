@@ -13,7 +13,6 @@ async fn main() -> anyhow::Result<()> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-
     let settings = Settings::from_env()?;
     let db = if let Some(database_url) = settings.database_url.as_deref() {
         let pool = PgPoolOptions::new()
@@ -28,13 +27,17 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("DATABASE_URL is not configured; readiness will remain unavailable");
         None
     };
-
-    let app = build_app(AppState::new(db), &settings.cors_origins);
+    if settings.jwt_secret.is_none() {
+        tracing::warn!("LIVE_TRON_JWT_SECRET is missing; authenticated routes will remain unavailable");
+    }
+    let app = build_app(
+        AppState::new(db).with_jwt_secret(settings.jwt_secret),
+        &settings.cors_origins,
+    );
     let listener = TcpListener::bind(settings.bind_addr)
         .await
         .with_context(|| format!("Could not bind to {}", settings.bind_addr))?;
     tracing::info!(address = %settings.bind_addr, "LIVE_TRON API listening");
-
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -56,7 +59,6 @@ async fn shutdown_signal() {
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
-
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
