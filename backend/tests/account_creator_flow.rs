@@ -27,7 +27,11 @@ async fn request(
     } else {
         Body::empty()
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), 1024 * 64).await.unwrap();
     let value = if bytes.is_empty() {
@@ -48,7 +52,12 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
         .await
         .unwrap();
     let migrations = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    Migrator::new(migrations).await.unwrap().run(&pool).await.unwrap();
+    Migrator::new(migrations)
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
 
     let secret = "integration-test-secret-with-at-least-32-bytes";
     let app = build_app(
@@ -110,14 +119,7 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
     assert_eq!(status, StatusCode::OK, "{login_tokens}");
 
     // 4. Read the authenticated account.
-    let (status, profile) = request(
-        &app,
-        Method::GET,
-        "/v1/me",
-        Some(&owner_access),
-        None,
-    )
-    .await;
+    let (status, profile) = request(&app, Method::GET, "/v1/me", Some(&owner_access), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["id"], owner_id);
 
@@ -199,7 +201,11 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(discovered.as_array().unwrap().iter().any(|item| item["slug"] == slug));
+    assert!(discovered
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["slug"] == slug));
 
     // 11. A viewer can follow another user's channel.
     let (status, _) = request(
@@ -223,7 +229,11 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(creator["display_name"], "Creator Updated");
-    assert!(creator["channels"].as_array().unwrap().iter().any(|item| item["slug"] == slug));
+    assert!(creator["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["slug"] == slug));
 
     // 13. Refresh rotation issues a new token pair.
     let (status, rotated) = request(
