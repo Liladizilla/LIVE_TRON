@@ -17,7 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/auth/logout", post(auth::logout))
         .route("/v1/me", get(auth::me).patch(auth::update_me))
         .route("/v1/channels", get(channels::discover).post(channels::create))
-        .route("/v1/channels/:slug", get(channels::get_public).patch(channels::update))
-        .route("/v1/channels/:slug/follow", post(channels::follow).delete(channels::unfollow))
-        .route("/v1/creators/:slug", get(channels::creator_profile))
+        .route("/v1/channels/{slug}", get(channels::get_public).patch(channels::update))
+        .route("/v1/channels/{slug}/follow", post(channels::follow).delete(channels::unfollow))
+        .route("/v1/creators/{slug}", get(channels::creator_profile))
 }
