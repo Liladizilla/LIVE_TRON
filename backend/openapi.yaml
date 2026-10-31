@@ -177,6 +177,106 @@ paths:
       summary: Unfollow channel
       responses:
         "204": { description: Follow removed or did not exist }
+  /v1/channels/{slug}/streams:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create a stream and issue a one-time publishing key
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      responses:
+        "201": { description: Stream created with one-time plaintext publishing key }
+        "404": { description: Channel not found or not owned by caller }
+  /v1/streams:
+    get:
+      summary: Discover public live streams
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string, maxLength: 80 }
+        - in: query
+          name: category
+          schema: { type: string, enum: [gaming, music, talk, education, sports, irl, commerce] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
+      responses:
+        "200": { description: Live public non-mature streams }
+  /v1/streams/{stream_id}:
+    parameters:
+      - in: path
+        name: stream_id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read stream metadata; private streams are owner-only
+      responses:
+        "200": { description: Stream metadata }
+        "404": { description: Stream not found }
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Update stream title, category, or visibility
+      responses:
+        "200": { description: Updated stream }
+        "404": { description: Stream not found or not owned by caller }
+  /v1/streams/{stream_id}/publishing-key/rotate:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Rotate publishing key; prior key is revoked
+      responses:
+        "200": { description: New one-time publishing key }
+  /v1/streams/{stream_id}/publishing-key:
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Revoke active publishing key
+      responses:
+        "204": { description: Active key revoked }
+  /internal/v1/streams/{stream_id}/authorize-publish:
+    post:
+      summary: Validate a publishing key for an internal media gateway
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publishing_key]
+              properties:
+                publishing_key: { type: string }
+      responses:
+        "200": { description: Active key authorized }
+        "401": { description: Invalid or revoked key }
+  /internal/v1/media/events:
+    post:
+      summary: Trusted internal ingest lifecycle callback
+      parameters:
+        - in: header
+          name: X-Live-Tron-Media-Secret
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, stream_id, event_type]
+              properties:
+                event_id: { type: string, format: uuid }
+                stream_id: { type: string, format: uuid }
+                event_type: { type: string, enum: [ingest_started, ingest_ended] }
+      responses:
+        "204": { description: Event applied or identical duplicate ignored }
+        "401": { description: Invalid internal secret }
+        "409": { description: Invalid state transition or reused event ID }
+        "503": { description: Media event secret is not configured }
   /v1/creators/{slug}:
     parameters:
       - in: path
