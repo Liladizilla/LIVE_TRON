@@ -171,6 +171,9 @@ async fn stream_lifecycle_credentials_visibility_and_media_events_are_guarded() 
     let active: i64 = sqlx::query_scalar("SELECT count(*) FROM stream_publish_credentials WHERE stream_id = $1 AND revoked_at IS NULL")
         .bind(Uuid::parse_str(&stream_id).unwrap()).fetch_one(&pool).await.unwrap();
     assert_eq!(active, 0);
+    let (status, _) = request(&app, Method::POST, &format!("/internal/v1/streams/{stream_id}/authorize-publish"),
+        None, None, Some(json!({"publishing_key": second_key}))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // Cleanup only test-owned rows, respecting foreign-key order.
     let stream_uuid = Uuid::parse_str(&stream_id).unwrap();
@@ -184,4 +187,17 @@ async fn stream_lifecycle_credentials_visibility_and_media_events_are_guarded() 
         .bind(format!("stream-viewer-{suffix}@example.test"))
         .execute(&pool).await.unwrap();
     pool.close().await;
+}
+
+
+#[tokio::test]
+async fn media_callbacks_fail_closed_when_internal_secret_is_missing() {
+    let app = build_app(AppState::default(), &[]);
+    let payload = json!({
+        "event_id": Uuid::new_v4(),
+        "stream_id": Uuid::new_v4(),
+        "event_type": "ingest_started"
+    });
+    let (status, body) = request(&app, Method::POST, "/internal/v1/media/events", None, None, Some(payload)).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
 }
