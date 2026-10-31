@@ -24,3 +24,46 @@ jobs:
         run: npm install
       - name: Typecheck and build
         run: npm run build
+
+  api:
+    name: Rust API and database
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: live_tron
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: live_tron
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U live_tron -d live_tron"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgres://live_tron:ci-password@localhost:5432/live_tron
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run API tests
+        run: cargo test --all-targets
+      - name: Apply database migrations
+        run: cargo run --bin migrate
