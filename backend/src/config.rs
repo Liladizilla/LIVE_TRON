@@ -33,7 +33,7 @@ impl Settings {
             .filter(|value| !value.trim().is_empty());
         if let Some(secret) = &jwt_secret {
             anyhow::ensure!(
-                secret.as_bytes().len() >= 32,
+                secret.len() >= 32,
                 "LIVE_TRON_JWT_SECRET must contain at least 32 bytes"
             );
         }
