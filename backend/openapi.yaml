@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: LIVE_TRON API
   version: 0.3.0
-  description: Account and creator API foundation. Access tokens use the live-tron-api issuer and live-tron-web audience. Media ingest and playback are not implemented.
+  description: Account and creator API foundation. JSON request bodies are limited to 64 KiB. Access tokens use the live-tron-api issuer and live-tron-web audience. Media ingest and playback are not implemented.
 servers:
   - url: http://localhost:8080
 components:
