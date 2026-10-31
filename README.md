@@ -22,7 +22,7 @@
 - Argon2id password hashing, short-lived HS256 access tokens, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
 - Registration, login, refresh, logout, current-profile, and profile-update endpoints.
 - Creator channel creation, owner-only channel updates, public channel discovery, creator profiles, and follow/unfollow endpoints.
-- Exact-origin CORS allowlist, validated environment settings, API tests, and PostgreSQL-backed CI.
+- Exact-origin CORS allowlist, validated environment settings, password/token unit tests, a PostgreSQL-backed account-to-channel integration flow, and CI.
 
 ## Run the web client
 
