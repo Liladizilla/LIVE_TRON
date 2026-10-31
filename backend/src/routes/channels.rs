@@ -51,6 +51,16 @@ pub struct ChannelView {
     pub is_mature: bool,
     pub follower_count: i64,
 }
+fn valid_slug(slug: &str) -> bool {
+    (3..=48).contains(&slug.len())
+        && slug.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && slug.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        && !slug.contains("--")
+        && slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
 fn validate_channel(title: &str, description: &str, category: &str) -> Result<(), ApiError> {
     if !(2..=100).contains(&title.trim().chars().count()) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_channel_title"));
@@ -81,12 +91,7 @@ pub async fn create(
     let description = input.description.unwrap_or_default();
     let category = input.category.unwrap_or_else(|| "talk".to_owned());
     validate_channel(title, &description, &category)?;
-    if !(3..=48).contains(&slug.len())
-        || !slug
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        || !slug.as_bytes()[0].is_ascii_alphanumeric()
-    {
+    if !valid_slug(&slug) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_channel_slug"));
     }
     let channel = sqlx::query_as::<_, ChannelView>("INSERT INTO channels (owner_user_id, slug, title, description, category, is_mature) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, owner_user_id, slug, title, description, category, is_mature, 0::bigint AS follower_count")
@@ -240,4 +245,21 @@ pub async fn creator_profile(
     Ok(Json(
         json!({ "id": profile.0, "display_name": profile.1, "avatar_url": profile.2, "created_at": profile.3, "channels": channels }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_slug;
+
+    #[test]
+    fn channel_slugs_are_safe_and_url_friendly() {
+        assert!(valid_slug("live-tron"));
+        assert!(valid_slug("creator-2026"));
+        assert!(!valid_slug("ab"));
+        assert!(!valid_slug("-creator"));
+        assert!(!valid_slug("creator-"));
+        assert!(!valid_slug("creator--live"));
+        assert!(!valid_slug("Creator-Live"));
+        assert!(!valid_slug("creator/live"));
+    }
 }
