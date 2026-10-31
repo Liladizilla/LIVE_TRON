@@ -59,19 +59,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-      - name: Format Rust sources for formatter artifact
-        run: cargo fmt --all
-      - name: Upload formatted backend source
-        uses: actions/upload-artifact@v4
-        with:
-          name: rustfmt-backend
-          path: |
-            backend/src/config.rs
-            backend/src/main.rs
-            backend/src/routes/mod.rs
-            backend/src/routes/streams.rs
-            backend/src/state.rs
-            backend/tests/stream_lifecycle.rs
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
