@@ -239,10 +239,18 @@ pub async fn login(
     let db = pool(&state)?;
     let jwt = secret(&state)?;
     let email = input.email.trim().to_lowercase();
+    if !is_valid_email(&email) {
+        let _ = hash_password(&input.password)?;
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials"));
+    }
     let user = sqlx::query_as::<_, UserRow>("SELECT id, email, display_name, avatar_url, password_hash, created_at FROM users WHERE lower(email) = $1")
         .bind(email).fetch_optional(db).await
-        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "login_failed"))?
-        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials"))?;
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "login_failed"))?;
+    let Some(user) = user else {
+        // Spend one Argon2 operation for unknown accounts to reduce email enumeration by timing.
+        let _ = hash_password(&input.password)?;
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials"));
+    };
     if !verify_password(&input.password, &user.password_hash) {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_credentials"));
     }
