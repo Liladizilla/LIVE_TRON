@@ -9,6 +9,7 @@ pub struct Settings {
     pub cors_origins: Vec<HeaderValue>,
     pub database_max_connections: u32,
     pub jwt_secret: Option<String>,
+    pub media_event_secret: Option<String>,
 }
 
 impl Settings {
@@ -37,6 +38,15 @@ impl Settings {
                 "LIVE_TRON_JWT_SECRET must contain at least 32 bytes"
             );
         }
+        let media_event_secret = std::env::var("LIVE_TRON_MEDIA_EVENT_SECRET")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        if let Some(secret) = &media_event_secret {
+            anyhow::ensure!(
+                secret.len() >= 32,
+                "LIVE_TRON_MEDIA_EVENT_SECRET must contain at least 32 bytes"
+            );
+        }
         let cors_origins = std::env::var("LIVE_TRON_CORS_ORIGINS")
             .unwrap_or_default()
             .split(',')
@@ -54,6 +64,7 @@ impl Settings {
             cors_origins,
             database_max_connections,
             jwt_secret,
+            media_event_secret,
         })
     }
 }

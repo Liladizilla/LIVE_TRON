@@ -2,6 +2,7 @@ pub mod auth;
 pub mod channels;
 mod health;
 mod meta;
+pub mod streams;
 
 use crate::state::AppState;
 use axum::{
@@ -31,5 +32,24 @@ pub fn router() -> Router<AppState> {
             "/v1/channels/{slug}/follow",
             post(channels::follow).delete(channels::unfollow),
         )
+        .route("/v1/channels/{slug}/streams", post(streams::create))
+        .route("/v1/streams", get(streams::discover))
+        .route(
+            "/internal/v1/streams/{stream_id}/authorize-publish",
+            post(streams::authorize_publish),
+        )
+        .route(
+            "/v1/streams/{stream_id}",
+            get(streams::get_public).patch(streams::update),
+        )
+        .route(
+            "/v1/streams/{stream_id}/publishing-key/rotate",
+            post(streams::rotate_key),
+        )
+        .route(
+            "/v1/streams/{stream_id}/publishing-key",
+            axum::routing::delete(streams::revoke_key),
+        )
+        .route("/internal/v1/media/events", post(streams::media_event))
         .route("/v1/creators/{slug}", get(channels::creator_profile))
 }

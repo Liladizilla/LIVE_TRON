@@ -32,8 +32,15 @@ async fn main() -> anyhow::Result<()> {
             "LIVE_TRON_JWT_SECRET is missing; authenticated routes will remain unavailable"
         );
     }
+    if settings.media_event_secret.is_none() {
+        tracing::warn!(
+            "LIVE_TRON_MEDIA_EVENT_SECRET is missing; internal media events will fail closed"
+        );
+    }
     let app = build_app(
-        AppState::new(db).with_jwt_secret(settings.jwt_secret),
+        AppState::new(db)
+            .with_jwt_secret(settings.jwt_secret)
+            .with_media_event_secret(settings.media_event_secret),
         &settings.cors_origins,
     );
     let listener = TcpListener::bind(settings.bind_addr)
@@ -61,9 +68,6 @@ async fn shutdown_signal() {
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
+    tokio::select! { _ = ctrl_c => {}, _ = terminate => {}, }
     tracing::info!("shutdown signal received");
 }
