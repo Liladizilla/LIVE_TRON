@@ -37,7 +37,8 @@ impl Settings {
             .map(str::trim)
             .filter(|origin| !origin.is_empty())
             .map(|origin| {
-                origin.parse::<HeaderValue>()
+                origin
+                    .parse::<HeaderValue>()
                     .with_context(|| format!("Invalid CORS origin: {origin}"))
             })
             .collect::<Result<Vec<_>>>()?;
