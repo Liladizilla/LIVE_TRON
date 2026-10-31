@@ -203,7 +203,11 @@ async fn account_session_creator_and_follow_flow() {
         .unwrap();
     let (status, channels) = json_response(discover).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(channels.as_array().unwrap().iter().any(|item| item["slug"] == slug));
+    assert!(channels
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["slug"] == slug));
 
     let unfollow = app
         .clone()
