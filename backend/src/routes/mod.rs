@@ -1,8 +1,8 @@
 mod health;
 mod meta;
 
-use axum::{routing::get, Router};
 use crate::state::AppState;
+use axum::{routing::get, Router};
 
 pub fn router() -> Router<AppState> {
     Router::new()
