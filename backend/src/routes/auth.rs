@@ -44,6 +44,8 @@ fn secret(state: &AppState) -> Result<&str, ApiError> {
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     sub: String,
+    iss: String,
+    aud: String,
     exp: usize,
     iat: usize,
 }
@@ -116,6 +118,8 @@ fn create_access_token(user_id: Uuid, secret: &str) -> Result<String, ApiError> 
     let now = Utc::now();
     let claims = Claims {
         sub: user_id.to_string(),
+        iss: "live-tron-api".to_owned(),
+        aud: "live-tron-web".to_owned(),
         iat: now.timestamp() as usize,
         exp: (now + Duration::minutes(15)).timestamp() as usize,
     };
@@ -133,6 +137,47 @@ fn create_refresh_token() -> String {
 }
 fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+fn is_valid_refresh_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_valid_email(email: &str) -> bool {
+    if email.len() > 254 || !email.is_ascii() {
+        return false;
+    }
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    if local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || domain.is_empty()
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        return false;
+    }
+    if !local.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'%' | b'+' | b'-')
+    }) {
+        return false;
+    }
+    let labels: Vec<&str> = domain.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label.as_bytes()[0].is_ascii_alphanumeric()
+                && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        && labels.last().is_some_and(|label| label.len() >= 2)
 }
 
 async fn issue_session(
@@ -168,7 +213,7 @@ pub async fn register(
     let jwt = secret(&state)?;
     let email = input.email.trim().to_lowercase();
     let display_name = input.display_name.trim();
-    if email.len() > 254 || !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+    if !is_valid_email(&email) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_email"));
     }
     if !(2..=80).contains(&display_name.chars().count()) {
@@ -210,9 +255,7 @@ pub async fn refresh(
 ) -> Result<Json<TokenResponse>, ApiError> {
     let db = pool(&state)?;
     let jwt = secret(&state)?;
-    if input.refresh_token.len() != 64
-        || !input.refresh_token.bytes().all(|b| b.is_ascii_hexdigit())
-    {
+    if !is_valid_refresh_token(&input.refresh_token) {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_refresh_token"));
     }
     let old_hash = token_hash(&input.refresh_token);
@@ -259,7 +302,7 @@ pub async fn logout(
     Json(input): Json<RefreshRequest>,
 ) -> Result<StatusCode, ApiError> {
     let db = pool(&state)?;
-    if input.refresh_token.len() != 64 {
+    if !is_valid_refresh_token(&input.refresh_token) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_refresh_token"));
     }
     sqlx::query("UPDATE refresh_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL")
@@ -275,10 +318,13 @@ pub fn authenticated_user(headers: &HeaderMap, state: &AppState) -> Result<Uuid,
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or(ApiError(StatusCode::UNAUTHORIZED, "missing_bearer_token"))?;
+    let mut validation = Validation::default();
+    validation.set_issuer(&["live-tron-api"]);
+    validation.set_audience(&["live-tron-web"]);
     let claims = decode::<Claims>(
         value,
         &DecodingKey::from_secret(jwt.as_bytes()),
-        &Validation::default(),
+        &validation,
     )
     .map_err(|_| ApiError(StatusCode::UNAUTHORIZED, "invalid_access_token"))?;
     Uuid::parse_str(&claims.claims.sub)
@@ -341,5 +387,22 @@ mod tests {
         assert_eq!(first.len(), 64);
         assert_ne!(first, second);
         assert_ne!(token_hash(&first), first);
+        assert!(is_valid_refresh_token(&first));
+        assert!(!is_valid_refresh_token("not-a-token"));
+        assert!(!is_valid_refresh_token(&"z".repeat(64)));
+    }
+
+    #[test]
+    fn email_validation_rejects_malformed_addresses() {
+        assert!(is_valid_email("creator+live@example.test"));
+        assert!(is_valid_email("a.b_1@example.co.ke"));
+        assert!(!is_valid_email("missing-at.example.test"));
+        assert!(!is_valid_email("@example.test"));
+        assert!(!is_valid_email("name@"));
+        assert!(!is_valid_email("name@example"));
+        assert!(!is_valid_email("name..dot@example.test"));
+        assert!(!is_valid_email("name@-example.test"));
+        assert!(!is_valid_email("name@example-.test"));
+        assert!(!is_valid_email("name with space@example.test"));
     }
 }
