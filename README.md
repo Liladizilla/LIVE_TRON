@@ -22,7 +22,7 @@
 - Argon2id password hashing, short-lived HS256 access tokens scoped to the LIVE_TRON issuer/audience, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
 - Registration, login, refresh, logout, current-profile, and profile-update endpoints.
 - Creator channel creation, owner-only channel updates, public channel discovery, creator profiles, and follow/unfollow endpoints.
-- Exact-origin CORS allowlist, validated environment settings, strict email/refresh-token/channel-slug validation, password/token unit tests, and a PostgreSQL-backed account-to-channel lifecycle test.
+- Exact-origin CORS allowlist, a 64 KiB JSON request-body cap, validated environment settings, strict email/refresh-token/channel-slug validation, Argon2 timing equalization for unknown login accounts, password/token unit tests, and a PostgreSQL-backed account-to-channel lifecycle test.
 
 ## Run the web client
 
@@ -73,7 +73,7 @@ The API and migration runner load `backend/.env` automatically when started from
 
 Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
 
-Registration requires an ASCII email with a valid dotted domain, display name (2–80 characters), and password (12–128 bytes). Channel slugs are lowercase URL-safe segments with single hyphen separators. Refresh tokens must be 64 hexadecimal characters and are revoked on logout or successful rotation. The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
+JSON request bodies are capped at 64 KiB. Registration requires an ASCII email with a valid dotted domain, display name (2–80 characters), and password (12–128 bytes). Login returns the same public error for unknown accounts and incorrect passwords, and performs a password-hash operation for unknown accounts to reduce timing-based account enumeration. Channel slugs are lowercase URL-safe segments with single hyphen separators. Refresh tokens must be 64 hexadecimal characters and are revoked on logout or successful rotation. The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
 
 OpenAPI contract: [backend/openapi.yaml](backend/openapi.yaml).
 
