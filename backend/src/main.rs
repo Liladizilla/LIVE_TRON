@@ -9,7 +9,9 @@ use tracing_subscriber::EnvFilter;
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let settings = Settings::from_env()?;
@@ -28,7 +30,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = build_app(AppState::new(db), &settings.cors_origins);
-    let listener = TcpListener::bind(settings.bind_addr).await
+    let listener = TcpListener::bind(settings.bind_addr)
+        .await
         .with_context(|| format!("Could not bind to {}", settings.bind_addr))?;
     tracing::info!(address = %settings.bind_addr, "LIVE_TRON API listening");
 
@@ -45,7 +48,9 @@ async fn shutdown_signal() {
     };
     #[cfg(unix)]
     let terminate = async {
-        if let Ok(mut signal) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        if let Ok(mut signal) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
             signal.recv().await;
         }
     };
