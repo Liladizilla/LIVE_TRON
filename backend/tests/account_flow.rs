@@ -87,6 +87,20 @@ async fn account_session_creator_and_follow_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile["id"], user_id);
 
+    let updated_profile = app
+        .clone()
+        .oneshot(request(
+            Method::PATCH,
+            "/v1/me",
+            json!({ "display_name": "Updated Creator" }),
+            Some(&access),
+        ))
+        .await
+        .unwrap();
+    let (status, updated_profile) = json_response(updated_profile).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated_profile["display_name"], "Updated Creator");
+
     let login = app
         .clone()
         .oneshot(request(
@@ -147,6 +161,34 @@ async fn account_session_creator_and_follow_flow() {
     let (status, channel) = json_response(create_channel).await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(channel["slug"], slug);
+
+    let owner_update = app
+        .clone()
+        .oneshot(request(
+            Method::PATCH,
+            &format!("/v1/channels/{slug}"),
+            json!({ "title": "Updated Creator Channel" }),
+            Some(&rotated_access),
+        ))
+        .await
+        .unwrap();
+    let (status, owner_update) = json_response(owner_update).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(owner_update["title"], "Updated Creator Channel");
+
+    let creator_profile = app
+        .clone()
+        .oneshot(request(
+            Method::GET,
+            &format!("/v1/creators/{slug}"),
+            json!({}),
+            None,
+        ))
+        .await
+        .unwrap();
+    let (status, creator_profile) = json_response(creator_profile).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(creator_profile["display_name"], "Updated Creator");
 
     let second_email = format!("viewer-{suffix}@example.test");
     let second_user = app
@@ -222,6 +264,7 @@ async fn account_session_creator_and_follow_flow() {
     assert_eq!(unfollow.status(), StatusCode::NO_CONTENT);
 
     let logout = app
+        .clone()
         .oneshot(request(
             Method::POST,
             "/v1/auth/logout",
@@ -231,6 +274,30 @@ async fn account_session_creator_and_follow_flow() {
         .await
         .unwrap();
     assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+
+    let revoked_replay = app
+        .clone()
+        .oneshot(request(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": rotated_refresh }),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(revoked_replay.status(), StatusCode::UNAUTHORIZED);
+
+    sqlx::query("DELETE FROM channels WHERE slug = $1")
+        .bind(&slug)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM users WHERE email IN ($1, $2)")
+        .bind(&email)
+        .bind(&second_email)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     pool.close().await;
 }
