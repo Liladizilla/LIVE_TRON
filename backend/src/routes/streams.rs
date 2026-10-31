@@ -186,6 +186,12 @@ pub async fn rotate_key(State(state): State<AppState>, headers: HeaderMap, Path(
     let owner = authenticated_user(&headers, &state)?;
     let db = pool(&state)?;
     verify_owner(db, stream_id, owner).await?;
+    let status = sqlx::query_scalar::<_, String>("SELECT status FROM streams WHERE id = $1")
+        .bind(stream_id).fetch_one(db).await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "publishing_key_rotation_failed"))?;
+    if status == "ended" {
+        return Err(ApiError(StatusCode::CONFLICT, "stream_already_ended"));
+    }
     let mut tx = db.begin().await.map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "publishing_key_rotation_failed"))?;
     sqlx::query("UPDATE stream_publish_credentials SET revoked_at = now() WHERE stream_id = $1 AND revoked_at IS NULL")
         .bind(stream_id).execute(&mut *tx).await.map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "publishing_key_rotation_failed"))?;
