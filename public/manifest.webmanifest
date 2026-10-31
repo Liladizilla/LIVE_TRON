@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "LIVE_TRON",
+  "short_name": "LIVE_TRON",
+  "description": "Watch, discover, and broadcast live.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#090b0f",
+  "theme_color": "#090b0f",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
