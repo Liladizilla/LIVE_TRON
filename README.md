@@ -51,7 +51,7 @@ cargo run --bin migrate
 cargo run --bin live-tron-api
 ```
 
-The API reads environment variables directly; the example file documents the expected values. Do not put production secrets in source control.
+The API and migration runner load `backend/.env` automatically when started from the `backend` directory; shell environment variables override file values. Do not put production secrets in source control.
 
 | Endpoint | Meaning |
 | --- | --- |
