@@ -9,51 +9,29 @@ pub struct Settings {
     pub cors_origins: Vec<HeaderValue>,
     pub database_max_connections: u32,
     pub jwt_secret: Option<String>,
+    pub media_event_secret: Option<String>,
 }
 
 impl Settings {
     pub fn from_env() -> Result<Self> {
-        let bind_addr = std::env::var("LIVE_TRON_BIND")
-            .unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
-            .parse()
-            .context("LIVE_TRON_BIND must be a valid socket address")?;
-        let database_url = std::env::var("DATABASE_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty());
-        let database_max_connections = std::env::var("LIVE_TRON_DATABASE_MAX_CONNECTIONS")
-            .unwrap_or_else(|_| "10".to_owned())
-            .parse::<u32>()
-            .context("LIVE_TRON_DATABASE_MAX_CONNECTIONS must be an integer")?;
-        anyhow::ensure!(
-            (1..=100).contains(&database_max_connections),
-            "LIVE_TRON_DATABASE_MAX_CONNECTIONS must be between 1 and 100"
-        );
-        let jwt_secret = std::env::var("LIVE_TRON_JWT_SECRET")
-            .ok()
-            .filter(|value| !value.trim().is_empty());
+        let bind_addr = std::env::var("LIVE_TRON_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
+            .parse().context("LIVE_TRON_BIND must be a valid socket address")?;
+        let database_url = std::env::var("DATABASE_URL").ok().filter(|value| !value.trim().is_empty());
+        let database_max_connections = std::env::var("LIVE_TRON_DATABASE_MAX_CONNECTIONS").unwrap_or_else(|_| "10".to_owned())
+            .parse::<u32>().context("LIVE_TRON_DATABASE_MAX_CONNECTIONS must be an integer")?;
+        anyhow::ensure!((1..=100).contains(&database_max_connections), "LIVE_TRON_DATABASE_MAX_CONNECTIONS must be between 1 and 100");
+        let jwt_secret = std::env::var("LIVE_TRON_JWT_SECRET").ok().filter(|value| !value.trim().is_empty());
         if let Some(secret) = &jwt_secret {
-            anyhow::ensure!(
-                secret.len() >= 32,
-                "LIVE_TRON_JWT_SECRET must contain at least 32 bytes"
-            );
+            anyhow::ensure!(secret.len() >= 32, "LIVE_TRON_JWT_SECRET must contain at least 32 bytes");
         }
-        let cors_origins = std::env::var("LIVE_TRON_CORS_ORIGINS")
-            .unwrap_or_default()
-            .split(',')
-            .map(str::trim)
-            .filter(|origin| !origin.is_empty())
-            .map(|origin| {
-                origin
-                    .parse::<HeaderValue>()
-                    .with_context(|| format!("Invalid CORS origin: {origin}"))
-            })
+        let media_event_secret = std::env::var("LIVE_TRON_MEDIA_EVENT_SECRET").ok().filter(|value| !value.trim().is_empty());
+        if let Some(secret) = &media_event_secret {
+            anyhow::ensure!(secret.len() >= 32, "LIVE_TRON_MEDIA_EVENT_SECRET must contain at least 32 bytes");
+        }
+        let cors_origins = std::env::var("LIVE_TRON_CORS_ORIGINS").unwrap_or_default().split(',')
+            .map(str::trim).filter(|origin| !origin.is_empty())
+            .map(|origin| origin.parse::<HeaderValue>().with_context(|| format!("Invalid CORS origin: {origin}")))
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self {
-            bind_addr,
-            database_url,
-            cors_origins,
-            database_max_connections,
-            jwt_secret,
-        })
+        Ok(Self { bind_addr, database_url, cors_origins, database_max_connections, jwt_secret, media_event_secret })
     }
 }
