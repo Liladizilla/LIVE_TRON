@@ -53,8 +53,14 @@ pub struct ChannelView {
 }
 fn valid_slug(slug: &str) -> bool {
     (3..=48).contains(&slug.len())
-        && slug.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
-        && slug.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        && slug
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && slug
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
         && !slug.contains("--")
         && slug
             .bytes()
