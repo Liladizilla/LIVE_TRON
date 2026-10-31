@@ -111,7 +111,7 @@ async fn stream_lifecycle_credentials_visibility_and_media_events_are_guarded() 
     let (status, authorization) = request(&app, Method::POST, &format!("/internal/v1/streams/{stream_id}/authorize-publish"),
         None, None, Some(json!({"publishing_key": first_key}))).await;
     assert_eq!(status, StatusCode::OK, "{authorization}");
-    assert_eq!(authorization["authorized"], true);
+    assert!(authorization["authorized"].as_bool().unwrap());
 
     // 4. Publishing-key rotation replaces the prior credential and only returns plaintext once.
     let (status, rotated) = request(&app, Method::POST, &format!("/v1/streams/{stream_id}/publishing-key/rotate"),
