@@ -1,0 +1,194 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+  ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
+  Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
+  Search, Send, Settings2, ShieldCheck, Sparkles, Users, Video, X,
+} from 'lucide-react'
+import { categories, formatViewers, streams, type Category, type Stream } from './data'
+
+type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
+
+function App() {
+  const [activeCategory, setActiveCategory] = useState<Category>('For you')
+  const [query, setQuery] = useState('')
+  const [selectedStream, setSelectedStream] = useState<Stream | null>(null)
+  const [following, setFollowing] = useState<string[]>([])
+  const [saved, setSaved] = useState<string[]>([])
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [chatMessage, setChatMessage] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    { name: 'jayden', message: 'This lighting is unreal.' },
+    { name: 'lena.wav', message: 'Just joined. What did I miss?' },
+    { name: 'pixelpilot', message: 'The detail on that build 👀' },
+  ])
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
+  const [installState, setInstallState] = useState<'hidden' | 'available' | 'installed'>('hidden')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    const onBeforeInstall = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as InstallPromptEvent)
+      setInstallState('available')
+    }
+    const onInstalled = () => {
+      setInstallState('installed')
+      setInstallPrompt(null)
+    }
+    window.addEventListener('beforeinstallprompt', onBeforeInstall)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
+
+  const filteredStreams = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    return streams.filter((stream) => {
+      const matchesCategory = activeCategory === 'For you' || stream.category === activeCategory
+      const matchesQuery = !normalized || [stream.title, stream.creator, stream.category, stream.handle].some((value) => value.toLowerCase().includes(normalized))
+      return matchesCategory && matchesQuery
+    })
+  }, [activeCategory, query])
+
+  const featured = streams.find((stream) => stream.featured) ?? streams[0]
+  const visibleStreams = filteredStreams.filter((stream) => stream.id !== featured.id)
+  const isFollowing = (stream: Stream) => following.includes(stream.id)
+
+  const toggleFollow = (stream: Stream) => {
+    setFollowing((current) => current.includes(stream.id) ? current.filter((id) => id !== stream.id) : [...current, stream.id])
+  }
+  const toggleSave = (stream: Stream) => {
+    setSaved((current) => current.includes(stream.id) ? current.filter((id) => id !== stream.id) : [...current, stream.id])
+    setNotice(saved.includes(stream.id) ? 'Removed from your saved list' : 'Added to your saved list')
+    window.setTimeout(() => setNotice(''), 2200)
+  }
+  const openStream = (stream: Stream) => {
+    setSelectedStream(stream)
+    setChatMessages([
+      { name: 'jayden', message: 'This lighting is unreal.' },
+      { name: 'lena.wav', message: 'Just joined. What did I miss?' },
+      { name: 'pixelpilot', message: 'The detail on that build 👀' },
+    ])
+  }
+  const sendChat = () => {
+    const message = chatMessage.trim()
+    if (!message) return
+    setChatMessages((current) => [...current, { name: 'you', message }])
+    setChatMessage('')
+  }
+  const installApp = async () => {
+    if (!installPrompt) return
+    await installPrompt.prompt()
+    const choice = await installPrompt.userChoice
+    if (choice.outcome === 'accepted') setInstallState('installed')
+    setInstallPrompt(null)
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileMenuOpen ? 'sidebar-open' : ''}`}>
+        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setSelectedStream(null) }}>
+          <span className="brand-mark"><span /></span>
+          <span className="brand-word">LIVE<span>_</span>TRON</span>
+        </a>
+        <button className="mobile-close icon-button" onClick={() => setMobileMenuOpen(false)} aria-label="Close navigation"><X size={19} /></button>
+        <div className="sidebar-label">MENU</div>
+        <nav className="primary-nav" aria-label="Main navigation">
+          <button className={!selectedStream ? 'nav-item active' : 'nav-item'} onClick={() => { setSelectedStream(null); setMobileMenuOpen(false) }}><Home size={19} /> <span>Home</span></button>
+          <button className="nav-item" onClick={() => { setActiveCategory('For you'); setSelectedStream(null); setMobileMenuOpen(false) }}><Compass size={19} /> <span>Discover</span></button>
+          <button className="nav-item" onClick={() => { setNotice('Following channels will appear here as you follow creators.'); setMobileMenuOpen(false) }}><Users size={19} /> <span>Following</span><span className="nav-count">{following.length || ''}</span></button>
+          <button className="nav-item" onClick={() => { setNotice(saved.length ? `${saved.length} saved stream(s) in your list.` : 'Your saved streams will appear here.'); setMobileMenuOpen(false) }}><Bookmark size={19} /> <span>Saved</span></button>
+        </nav>
+        <div className="sidebar-divider" />
+        <div className="sidebar-label">YOUR INTERESTS</div>
+        <nav className="interest-nav" aria-label="Categories">
+          {categories.slice(1, 6).map((category) => (
+            <button key={category} className={activeCategory === category ? 'nav-item active' : 'nav-item'} onClick={() => { setActiveCategory(category); setSelectedStream(null); setMobileMenuOpen(false) }}>
+              <span className={`interest-dot dot-${category.toLowerCase()}`} /> <span>{category}</span>
+            </button>
+          ))}
+          <button className="nav-item muted-nav" onClick={() => setNotice('More categories are being added to LIVE_TRON.') }><Plus size={17} /><span>More topics</span></button>
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="creator-card">
+            <div className="creator-icon"><Video size={18} /></div>
+            <div><strong>Go live on LIVE_TRON</strong><span>Your audience is waiting.</span></div>
+            <button aria-label="Creator studio" onClick={() => setNotice('Creator Studio is in the next development batch.')}><ArrowLeft size={16} /></button>
+          </div>
+          <button className="nav-item muted-nav" onClick={() => setNotice('Settings will be available when accounts are implemented.')}><Settings2 size={18} /><span>Settings</span></button>
+          <div className="profile-row"><div className="profile-avatar">A</div><div className="profile-copy"><strong>Guest account</strong><span>Explore LIVE_TRON</span></div><MoreHorizontal size={19} /></div>
+        </div>
+      </aside>
+
+      {mobileMenuOpen && <button className="mobile-scrim" aria-label="Close navigation overlay" onClick={() => setMobileMenuOpen(false)} />}
+
+      <main className="main-area">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileMenuOpen(true)}><Menu size={21} /></button>
+            <div className="breadcrumb"><span>LIVE_TRON</span><span className="breadcrumb-slash">/</span><strong>{selectedStream ? 'Watch' : 'Discover'}</strong></div>
+          </div>
+          <div className="topbar-actions">
+            <label className="search-box"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search streams, creators..." aria-label="Search streams and creators" /><kbd>⌘ K</kbd></label>
+            <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNotice('You are all caught up.') }><Bell size={19} /><i /></button>
+            <button className="top-avatar" aria-label="Guest profile">A</button>
+          </div>
+        </header>
+
+        {selectedStream ? (
+          <section className="watch-page">
+            <button className="back-link" onClick={() => setSelectedStream(null)}><ArrowLeft size={16} /> Back to discovery</button>
+            <div className="watch-layout">
+              <div className="watch-main">
+                <div className="watch-player" style={{ backgroundImage: `linear-gradient(180deg, transparent 55%, rgba(0,0,0,.72)), url("${selectedStream.image}")` }}>
+                  <div className="player-topline"><span className="live-pill"><i /> LIVE</span><span className="player-viewers"><Users size={14} /> {formatViewers(selectedStream.viewers)} watching</span></div>
+                  <div className="player-center"><button className="play-button" aria-label="Play stream preview"><Play size={25} fill="currentColor" /></button><span>Stream preview</span></div>
+                  <div className="player-bottomline"><span><Radio size={15} /> LIVE_TRON PLAYER</span><span>Preview experience · playback integration pending</span></div>
+                </div>
+                <div className="watch-title-row"><div><div className="eyebrow">{selectedStream.category.toUpperCase()} <span>·</span> LIVE NOW</div><h1>{selectedStream.title}</h1></div><button className={saved.includes(selectedStream.id) ? 'icon-button saved' : 'icon-button'} onClick={() => toggleSave(selectedStream)} aria-label="Save stream"><Bookmark size={19} /></button></div>
+                <p className="watch-description">{selectedStream.description}</p>
+                <div className="channel-strip"><div className="channel-avatar" style={{ background: selectedStream.accent }}>{selectedStream.avatar}</div><div className="channel-details"><strong>{selectedStream.creator} {selectedStream.verified && <ShieldCheck size={15} />}</strong><span>{selectedStream.handle}</span></div><button className={isFollowing(selectedStream) ? 'follow-button following' : 'follow-button'} onClick={() => toggleFollow(selectedStream)}>{isFollowing(selectedStream) ? <><Check size={15} /> Following</> : <><Plus size={15} /> Follow</>}</button></div>
+              </div>
+              <aside className="chat-panel">
+                <div className="chat-header"><div><MessageCircle size={17} /><strong>Live chat</strong></div><span>COMMUNITY</span></div>
+                <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
+                <div className="chat-feed">{chatMessages.map((item, index) => <div className="chat-line" key={`${item.name}-${index}`}><strong className={item.name === 'you' ? 'chat-you' : ''}>{item.name}</strong><span>{item.message}</span></div>)}</div>
+                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} placeholder="Send a message..." aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!chatMessage.trim()}><Send size={16} /></button></form>
+                <div className="chat-footer">Guest mode · chat is local preview only</div>
+              </aside>
+            </div>
+          </section>
+        ) : (
+          <div className="content-wrap">
+            <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> THE LIVE NETWORK</div><h1>Find your <span>live.</span></h1><p>Real-time moments. Communities worth staying for.</p></div><button className="go-live-button" onClick={() => setNotice('Creator Studio is being built. Broadcasting will be enabled after ingest and account services are ready.')}><Radio size={17} /> Go live <span className="go-live-arrow">↗</span></button></div>
+
+            <section className="featured-section">
+              <div className="section-heading"><div><span className="section-kicker">EDITOR'S PICK</span><h2>In the spotlight</h2></div><span className="updated-label"><span /> LIVE RIGHT NOW</span></div>
+              <article className="featured-card" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,10,14,.96) 0%, rgba(8,10,14,.78) 39%, rgba(8,10,14,.08) 100%), linear-gradient(0deg, rgba(8,10,14,.42), transparent 55%), url("${featured.image}")` }}>
+                <div className="featured-content"><div className="featured-meta"><span className="live-pill"><i /> LIVE</span><span>{featured.category}</span><span className="meta-separator">/</span><span>{formatViewers(featured.viewers)} watching</span></div><h2>{featured.title}</h2><p>{featured.description}</p><div className="featured-creator"><div className="mini-avatar" style={{ background: featured.accent }}>{featured.avatar}</div><strong>{featured.creator}</strong>{featured.verified && <ShieldCheck size={15} />}</div><div className="featured-actions"><button className="watch-button" onClick={() => openStream(featured)}><Play size={15} fill="currentColor" /> Watch live</button><button className="save-button" onClick={() => toggleSave(featured)}><Bookmark size={16} /> {saved.includes(featured.id) ? 'Saved' : 'Save for later'}</button></div></div>
+                <div className="featured-index"><span>01</span><i /><span>08</span></div>
+              </article>
+            </section>
+
+            <section className="discovery-section">
+              <div className="section-heading discovery-heading"><div><span className="section-kicker">YOUR NEXT OBSESSION</span><h2>Explore live channels</h2></div><button className="sort-button" onClick={() => setNotice('Streams are currently sorted by a curated discovery order.')} >Recommended <ChevronDown size={15} /></button></div>
+              <div className="category-tabs" role="tablist" aria-label="Stream categories">{categories.map((category) => <button key={category} role="tab" aria-selected={activeCategory === category} className={activeCategory === category ? 'category-tab selected' : 'category-tab'} onClick={() => setActiveCategory(category)}>{category === 'For you' && <Sparkles size={14} />}{category === 'Gaming' && <MonitorPlay size={14} />}{category === 'Music' && <Headphones size={14} />}{category === 'Talk' && <MessageCircle size={14} />}{category === 'Sports' && <Flame size={14} />}{category}</button>)}</div>
+              {query && <div className="results-label">{filteredStreams.length} result(s) for <strong>“{query}”</strong></div>}
+              {visibleStreams.length ? <div className="stream-grid">{visibleStreams.map((stream) => <article className="stream-card" key={stream.id}>
+                <button className="stream-thumbnail" style={{ backgroundImage: `linear-gradient(0deg, rgba(0,0,0,.58), transparent 55%), url("${stream.image}")` }} onClick={() => openStream(stream)} aria-label={`Watch ${stream.title}`}><span className="live-pill"><i /> LIVE</span><span className="thumbnail-duration">{stream.duration}</span><span className="thumbnail-play"><Play size={18} fill="currentColor" /></span><span className="thumbnail-viewers"><span /> {formatViewers(stream.viewers)} watching</span></button>
+                <div className="stream-info"><div className="stream-avatar" style={{ background: stream.accent }}>{stream.avatar}</div><div className="stream-copy"><button className="stream-title" onClick={() => openStream(stream)}>{stream.title}</button><div className="stream-creator">{stream.creator} {stream.verified && <ShieldCheck size={13} />}</div><div className="stream-category">{stream.category} <span>·</span> {formatViewers(stream.viewers)} watching</div></div><button className={saved.includes(stream.id) ? 'card-more saved' : 'card-more'} onClick={() => toggleSave(stream)} aria-label="Save stream"><Bookmark size={17} /></button></div>
+              </article>)}</div> : <div className="empty-state"><Search size={25} /><strong>No streams found</strong><span>Try another search or choose a different category.</span><button onClick={() => { setQuery(''); setActiveCategory('For you') }}>Clear filters</button></div>}
+            </section>
+            <footer className="page-footer"><span>LIVE<span className="footer-accent">_</span>TRON</span><span>Built for the moments that bring us together.</span><span>PREVIEW BUILD · 0.1.0</span></footer>
+          </div>
+        )}
+      </main>
+      {installState === 'available' && <div className="install-banner"><div><strong>Take LIVE_TRON with you</strong><span>Install the app for a focused, full-screen experience.</span></div><button onClick={installApp}>Install app</button><button className="dismiss-install" onClick={() => setInstallState('hidden')} aria-label="Dismiss install prompt"><X size={16} /></button></div>}
+      {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={15} /></button></div>}
+    </div>
+  )
+}
+
+export default App
