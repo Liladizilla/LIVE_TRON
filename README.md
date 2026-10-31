@@ -19,10 +19,10 @@
 - React 19, TypeScript, Vite 6 responsive discovery experience and PWA shell.
 - Rust 2021 / Axum API with liveness, readiness, and capability metadata endpoints.
 - PostgreSQL connection pool and additive schema for users, channels, streams, follows, refresh sessions, and moderation reports.
-- Argon2id password hashing, short-lived HS256 access tokens, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
+- Argon2id password hashing, short-lived HS256 access tokens scoped to the LIVE_TRON issuer/audience, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
 - Registration, login, refresh, logout, current-profile, and profile-update endpoints.
 - Creator channel creation, owner-only channel updates, public channel discovery, creator profiles, and follow/unfollow endpoints.
-- Exact-origin CORS allowlist, validated environment settings, password/token unit tests, a PostgreSQL-backed account-to-channel integration flow, and CI.
+- Exact-origin CORS allowlist, a 64 KiB JSON request-body cap, validated environment settings, strict email/refresh-token/channel-slug validation, Argon2 timing equalization for unknown login accounts, password/token unit tests, and a PostgreSQL-backed account-to-channel lifecycle test.
 
 ## Run the web client
 
@@ -73,13 +73,13 @@ The API and migration runner load `backend/.env` automatically when started from
 
 Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
 
-Registration requires a valid-looking email, display name (2–80 characters), and password (12–128 bytes). The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
+JSON request bodies are capped at 64 KiB. Registration requires an ASCII email with a valid dotted domain, display name (2–80 characters), and password (12–128 bytes). Login returns the same public error for unknown accounts and incorrect passwords, and performs a password-hash operation for unknown accounts to reduce timing-based account enumeration. Channel slugs are lowercase URL-safe segments with single hyphen separators. Refresh tokens must be 64 hexadecimal characters and are revoked on logout or successful rotation. The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
 
 OpenAPI contract: [backend/openapi.yaml](backend/openapi.yaml).
 
 ## Database model
 
-The additive initial migration creates:
+The additive migrations create:
 
 - `users` with a case-insensitive unique email index
 - `channels` with owner and stable slug
@@ -87,6 +87,7 @@ The additive initial migration creates:
 - `follows` with a composite primary key
 - `refresh_sessions` storing token hashes, not raw refresh tokens
 - `moderation_reports` with a review queue index
+- A follow-up validation migration that tightens channel slug and category constraints without deleting application rows
 
 Migrations do not drop tables or cascade-delete application data.
 
