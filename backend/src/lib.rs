@@ -29,6 +29,25 @@ pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
+    #[tokio::test]
+    async fn oversized_json_requests_are_rejected() {
+        let app = build_app(AppState::default(), &[]);
+        let payload = format!(r#"{{"email":"{}"}}"#, "a".repeat(65 * 1024));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/auth/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
 }
 
 #[cfg(test)]
