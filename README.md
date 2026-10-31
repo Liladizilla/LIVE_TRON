@@ -82,6 +82,8 @@ The API and migration runner load `backend/.env` automatically when started from
 | POST | `/internal/v1/streams/:stream_id/authorize-publish` | Publishing key | Validate an active key for a trusted media gateway |
 | POST | `/internal/v1/media/events` | Internal shared secret | Idempotent ingest-started / ingest-ended callbacks |
 
+Set `LIVE_TRON_MEDIA_EVENT_SECRET` to a unique random value of at least 32 bytes before enabling internal media lifecycle callbacks. Keep it private to the API and trusted media gateway; leave it unset until that gateway exists. Publishing keys are returned once and must be stored by the creator securely.
+
 Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
 
 JSON request bodies are capped at 64 KiB. Registration requires an ASCII email with a valid dotted domain, display name (2–80 characters), and password (12–128 bytes). Login returns the same public error for unknown accounts and incorrect passwords, and performs a password-hash operation for unknown accounts to reduce timing-based account enumeration. Channel slugs are lowercase URL-safe segments with single hyphen separators. Refresh tokens must be 64 hexadecimal characters and are revoked on logout or successful rotation. The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
