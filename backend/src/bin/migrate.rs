@@ -8,7 +8,7 @@ async fn main() -> anyhow::Result<()> {
     let database_url =
         std::env::var("DATABASE_URL").context("DATABASE_URL is required to run migrations")?;
     let migrations_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let migrator = Migrator::new(&migrations_path)
+    let migrator = Migrator::new(migrations_path)
         .await
         .context("Could not load migration directory")?;
     let pool = PgPoolOptions::new()
