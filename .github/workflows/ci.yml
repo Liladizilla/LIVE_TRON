@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   web:
@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -53,8 +51,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
       - name: Set up stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -63,12 +59,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-      - name: Apply Rust formatting
-        run: cargo fmt --all
-      - name: Commit formatting changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'style(api): apply rustfmt'
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
