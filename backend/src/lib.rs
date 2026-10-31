@@ -2,7 +2,7 @@ pub mod config;
 pub mod routes;
 pub mod state;
 
-use axum::http::{header, HeaderValue, Method};
+use axum::{extract::DefaultBodyLimit, http::{header, HeaderValue, Method}};
 use axum::Router;
 use state::AppState;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -26,6 +26,7 @@ pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
     Router::new()
         .merge(routes::router())
         .with_state(state)
+        .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
 }
