@@ -2,9 +2,9 @@
 
 **Live, together.** A premium-dark livestream platform for creators and communities across gaming, music, talk, education, sports, IRL, and live commerce.
 
-> Current release: **0.3.0 · Web discovery + account and creator API foundation**
+> Current release: **0.3.0 · Account, creator, and stream lifecycle API**
 >
-> The web client remains a frontend preview. The API now supports account sessions, profiles, channels, and follows. Creator broadcasting, chat, and media ingest/playback are not yet implemented.
+> The web client remains a frontend preview. The API supports account sessions, profiles, channels, follows, stream metadata, and secure publishing-key lifecycle. A real SFU/media plane and browser playback are still not connected.
 
 ## Product direction
 
@@ -22,6 +22,9 @@
 - Argon2id password hashing, short-lived HS256 access tokens scoped to the LIVE_TRON issuer/audience, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
 - Registration, login, refresh, logout, current-profile, and profile-update endpoints.
 - Creator channel creation, owner-only channel updates, public channel discovery, creator profiles, and follow/unfollow endpoints.
+- Owner-scoped stream creation and metadata editing, visibility controls, public live-stream discovery, and private-stream detail protection.
+- 256-bit publishing keys generated from OS randomness, SHA-256 hash-only storage, one-time plaintext delivery, rotation, revocation, and internal publish authorization.
+- Authenticated internal media lifecycle callbacks with constant-time shared-secret comparison, event-ID idempotency, and guarded created → live → ended transitions.
 - Exact-origin CORS allowlist, a 64 KiB JSON request-body cap, validated environment settings, strict email/refresh-token/channel-slug validation, Argon2 timing equalization for unknown login accounts, password/token unit tests, and a PostgreSQL-backed account-to-channel lifecycle test.
 
 ## Run the web client
@@ -70,6 +73,14 @@ The API and migration runner load `backend/.env` automatically when started from
 | POST | `/v1/channels/:slug/follow` | Bearer | Follow a channel |
 | DELETE | `/v1/channels/:slug/follow` | Bearer | Unfollow a channel |
 | GET | `/v1/creators/:slug` | Public | Read creator profile and channels |
+| POST | `/v1/channels/:slug/streams` | Owner bearer | Create stream and receive one-time publishing key |
+| GET | `/v1/streams` | Public | Discover live, public, non-mature streams |
+| GET | `/v1/streams/:stream_id` | Public / owner | Read stream; private streams are owner-only |
+| PATCH | `/v1/streams/:stream_id` | Owner bearer | Edit title, category, or visibility before stream ends |
+| POST | `/v1/streams/:stream_id/publishing-key/rotate` | Owner bearer | Revoke prior key and issue a replacement |
+| DELETE | `/v1/streams/:stream_id/publishing-key` | Owner bearer | Revoke active publishing key |
+| POST | `/internal/v1/streams/:stream_id/authorize-publish` | Publishing key | Validate an active key for a trusted media gateway |
+| POST | `/internal/v1/media/events` | Internal shared secret | Idempotent ingest-started / ingest-ended callbacks |
 
 Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
 
@@ -87,6 +98,8 @@ The additive migrations create:
 - `follows` with a composite primary key
 - `refresh_sessions` storing token hashes, not raw refresh tokens
 - `moderation_reports` with a review queue index
+- `stream_publish_credentials` storing only SHA-256 publishing-key hashes, with one active key per stream
+- `media_events` with unique event IDs for callback idempotency
 - A follow-up validation migration that tightens channel slug and category constraints without deleting application rows
 
 Migrations do not drop tables or cascade-delete application data.
@@ -120,7 +133,8 @@ Migrations do not drop tables or cascade-delete application data.
 - [x] Follow and unfollow endpoints
 - [ ] Email verification, password reset, MFA, and session management
 - [ ] Rate limiting, abuse protection, audit events, and account lockout policy
-- [ ] Stream lifecycle and secure publishing credential issuance
+- [x] Stream lifecycle API, owner authorization, visibility, and secure publishing credential issuance/rotation/revocation
+- [x] Internal media lifecycle event authentication and idempotency
 - [ ] WebRTC ingest, SFU routing, and viewer playback
 - [ ] Authenticated realtime chat, moderation, and presence
 - [ ] Interactive polls, reactions, and overlays
@@ -128,4 +142,4 @@ Migrations do not drop tables or cascade-delete application data.
 
 ## Project status
 
-This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected.
+This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected. Stream status changes to live only after a trusted internal ingest event. The current internal event callback and publishing-key authorization endpoints are integration boundaries, not an SFU. No video is ingested, routed, or played back by this release.
