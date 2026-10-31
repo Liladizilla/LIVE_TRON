@@ -118,6 +118,32 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login_tokens}");
 
+    // Invalid passwords and unknown accounts share the same public response.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        "/v1/auth/login",
+        None,
+        Some(json!({
+            "email": format!("owner-{suffix}@example.test"),
+            "password": "incorrect-password"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        "/v1/auth/login",
+        None,
+        Some(json!({
+            "email": format!("missing-{suffix}@example.test"),
+            "password": password
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
     // 4. Read the authenticated account.
     let (status, profile) = request(&app, Method::GET, "/v1/me", Some(&owner_access), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -168,6 +194,28 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
     assert_eq!(status, StatusCode::CREATED);
     let viewer_access = viewer_tokens["access_token"].as_str().unwrap();
 
+    // An unauthenticated caller cannot create a channel.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        "/v1/channels",
+        None,
+        Some(json!({ "slug": format!("guest-{suffix}"), "title": "Guest Channel" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The owner cannot follow their own channel.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        &format!("/v1/channels/{slug}/follow"),
+        Some(&owner_access),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
     // 8. A different account cannot update the creator's channel.
     let (status, _) = request(
         &app,
@@ -208,6 +256,15 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
         .any(|item| item["slug"] == slug));
 
     // 11. A viewer can follow another user's channel.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        &format!("/v1/channels/{slug}/follow"),
+        Some(viewer_access),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, _) = request(
         &app,
         Method::POST,
