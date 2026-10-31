@@ -24,6 +24,29 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.0, Json(json!({ "error": self.1 }))).into_response()
     }
+    #[test]
+    fn access_tokens_are_bound_to_live_tron_issuer_and_audience() {
+        let secret = "integration-test-secret-with-at-least-32-bytes";
+        let token = create_access_token(Uuid::new_v4(), secret).unwrap();
+        let mut validation = Validation::default();
+        validation.set_issuer(&["live-tron-api"]);
+        validation.set_audience(&["live-tron-web"]);
+        assert!(decode::<Claims>(
+            &token,
+            &DecodingKey::from_secret(secret.as_bytes()),
+            &validation
+        )
+        .is_ok());
+
+        validation.set_audience(&["untrusted-client"]);
+        assert!(decode::<Claims>(
+            &token,
+            &DecodingKey::from_secret(secret.as_bytes()),
+            &validation
+        )
+        .is_err());
+    }
+
 }
 fn pool(state: &AppState) -> Result<&PgPool, ApiError> {
     state.db.as_ref().ok_or(ApiError(
