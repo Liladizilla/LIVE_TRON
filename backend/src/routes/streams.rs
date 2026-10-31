@@ -236,7 +236,7 @@ pub struct MediaEvent {
 }
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() { return false; }
-    left.iter().zip(right).fold(0_u8, |difference, (a, b)| difference | (a ^ b)) == 0
+    left.iter().zip(right).fold(0_u8, |difference, (a, b)| difference | (*a ^ *b)) == 0
 }
 
 pub async fn media_event(State(state): State<AppState>, headers: HeaderMap, Json(event): Json<MediaEvent>) -> Result<StatusCode, ApiError> {
