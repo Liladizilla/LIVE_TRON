@@ -231,7 +231,7 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
         Method::POST,
         "/v1/auth/refresh",
         None,
-        Some(json!({ "refresh_token": owner_refresh })),
+        Some(json!({ "refresh_token": owner_refresh.clone() })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -254,7 +254,7 @@ async fn account_creator_lifecycle_is_authorized_and_refresh_tokens_rotate() {
         Method::POST,
         "/v1/auth/logout",
         None,
-        Some(json!({ "refresh_token": new_refresh })),
+        Some(json!({ "refresh_token": new_refresh.clone() })),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
