@@ -10,7 +10,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: Option<PgPool>) -> Self {
-        Self { db, jwt_secret: None, media_event_secret: None }
+        Self {
+            db,
+            jwt_secret: None,
+            media_event_secret: None,
+        }
     }
 
     pub fn with_jwt_secret(mut self, secret: Option<String>) -> Self {
