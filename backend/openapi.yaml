@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: LIVE_TRON API
   version: 0.3.0
-  description: Account and creator API foundation. Media ingest and playback are not implemented.
+  description: Account and creator API foundation. Access tokens use the live-tron-api issuer and live-tron-web audience. Media ingest and playback are not implemented.
 servers:
   - url: http://localhost:8080
 components:
@@ -61,7 +61,7 @@ paths:
               required: [email, password, display_name]
               properties:
                 email: { type: string, format: email }
-                password: { type: string, minLength: 12, maxLength: 128 }
+                password: { type: string, minLength: 12, maxLength: 128, description: "12 to 128 UTF-8 bytes; never trimmed." }
                 display_name: { type: string, minLength: 2, maxLength: 80 }
       responses:
         "201": { description: Account created and tokens issued }
