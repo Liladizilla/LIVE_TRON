@@ -43,7 +43,7 @@ Requirements: Rust stable and PostgreSQL 16+.
 cd backend
 cp .env.example .env
 # Edit .env: set DATABASE_URL and generate a unique LIVE_TRON_JWT_SECRET
-# of at least 32 bytes. Create the PostgreSQL database/user first.
+# of at least 32 bytes (for example, `openssl rand -hex 32`). Create the PostgreSQL database/user first.
 cargo run --bin migrate
 cargo run --bin live-tron-api
 ```
