@@ -2,8 +2,11 @@ pub mod config;
 pub mod routes;
 pub mod state;
 
-use axum::{extract::DefaultBodyLimit, http::{header, HeaderValue, Method}};
-use axum::Router;
+use axum::{
+    extract::DefaultBodyLimit,
+    http::{header, HeaderValue, Method},
+    Router,
+};
 use state::AppState;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
@@ -29,25 +32,6 @@ pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http())
-    #[tokio::test]
-    async fn oversized_json_requests_are_rejected() {
-        let app = build_app(AppState::default(), &[]);
-        let payload = format!(r#"{{"email":"{}"}}"#, "a".repeat(65 * 1024));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/auth/login")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(axum::body::Body::from(payload))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
 }
 
 #[cfg(test)]
@@ -115,5 +99,24 @@ mod tests {
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["media_plane"], "not_connected");
+    }
+
+    #[tokio::test]
+    async fn oversized_json_requests_are_rejected() {
+        let app = build_app(AppState::default(), &[]);
+        let payload = format!(r#"{{"email":"{}"}}"#, "a".repeat(65 * 1024));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/auth/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }
