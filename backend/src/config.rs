@@ -46,31 +46,57 @@ impl Settings {
             .ok()
             .filter(|value| !value.trim().is_empty());
         if let Some(secret) = &jwt_secret {
-            anyhow::ensure!(secret.len() >= 32, "LIVE_TRON_JWT_SECRET must contain at least 32 bytes");
+            anyhow::ensure!(
+                secret.len() >= 32,
+                "LIVE_TRON_JWT_SECRET must contain at least 32 bytes"
+            );
         }
         let media_event_secret = std::env::var("LIVE_TRON_MEDIA_EVENT_SECRET")
             .ok()
             .filter(|value| !value.trim().is_empty());
         if let Some(secret) = &media_event_secret {
-            anyhow::ensure!(secret.len() >= 32, "LIVE_TRON_MEDIA_EVENT_SECRET must contain at least 32 bytes");
+            anyhow::ensure!(
+                secret.len() >= 32,
+                "LIVE_TRON_MEDIA_EVENT_SECRET must contain at least 32 bytes"
+            );
         }
         let stun_urls = csv_env("LIVE_TRON_STUN_URLS", "stun:stun.l.google.com:19302");
-        anyhow::ensure!(stun_urls.iter().all(|url| url.starts_with("stun:") || url.starts_with("stuns:")), "LIVE_TRON_STUN_URLS must contain only stun: or stuns: URLs");
+        anyhow::ensure!(
+            stun_urls
+                .iter()
+                .all(|url| url.starts_with("stun:") || url.starts_with("stuns:")),
+            "LIVE_TRON_STUN_URLS must contain only stun: or stuns: URLs"
+        );
         let turn_urls = csv_env("LIVE_TRON_TURN_URLS", "");
-        anyhow::ensure!(turn_urls.iter().all(|url| url.starts_with("turn:") || url.starts_with("turns:")), "LIVE_TRON_TURN_URLS must contain only turn: or turns: URLs");
+        anyhow::ensure!(
+            turn_urls
+                .iter()
+                .all(|url| url.starts_with("turn:") || url.starts_with("turns:")),
+            "LIVE_TRON_TURN_URLS must contain only turn: or turns: URLs"
+        );
         let turn_shared_secret = std::env::var("LIVE_TRON_TURN_SHARED_SECRET")
             .ok()
             .filter(|value| !value.trim().is_empty());
         if let Some(secret) = &turn_shared_secret {
-            anyhow::ensure!(secret.len() >= 32, "LIVE_TRON_TURN_SHARED_SECRET must contain at least 32 bytes");
+            anyhow::ensure!(
+                secret.len() >= 32,
+                "LIVE_TRON_TURN_SHARED_SECRET must contain at least 32 bytes"
+            );
         }
-        anyhow::ensure!(turn_urls.is_empty() == turn_shared_secret.is_none(), "LIVE_TRON_TURN_URLS and LIVE_TRON_TURN_SHARED_SECRET must be configured together");
+        anyhow::ensure!(
+            turn_urls.is_empty() == turn_shared_secret.is_none(),
+            "LIVE_TRON_TURN_URLS and LIVE_TRON_TURN_SHARED_SECRET must be configured together"
+        );
         let cors_origins = std::env::var("LIVE_TRON_CORS_ORIGINS")
             .unwrap_or_default()
             .split(',')
             .map(str::trim)
             .filter(|origin| !origin.is_empty())
-            .map(|origin| origin.parse::<HeaderValue>().with_context(|| format!("Invalid CORS origin: {origin}")))
+            .map(|origin| {
+                origin
+                    .parse::<HeaderValue>()
+                    .with_context(|| format!("Invalid CORS origin: {origin}"))
+            })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             bind_addr,
