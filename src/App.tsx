@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import LiveMediaPlayer from './components/LiveMediaPlayer'
+import CreatorStudio from './components/CreatorStudio'
+import type { ApiUser } from './lib/api'
 import { fetchLiveStreams, isApiConfigured, toDiscoveryStream } from './lib/api'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
@@ -29,6 +31,8 @@ function App() {
   const [apiStreams, setApiStreams] = useState<Stream[] | null>(null)
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState('')
+  const [creatorStudioOpen, setCreatorStudioOpen] = useState(false)
+  const [creatorUser, setCreatorUser] = useState<ApiUser | null>(null)
 
   useEffect(() => {
     const onBeforeInstall = (event: Event) => {
@@ -143,10 +147,10 @@ function App() {
           <div className="creator-card">
             <div className="creator-icon"><Video size={18} /></div>
             <div><strong>Go live on LIVE_TRON</strong><span>Your audience is waiting.</span></div>
-            <button aria-label="Creator studio" onClick={() => setNotice('Creator Studio is in the next development batch.')}><ArrowLeft size={16} /></button>
+            <button aria-label="Creator studio" onClick={() => { setCreatorStudioOpen(true); setMobileMenuOpen(false) }}><ArrowLeft size={16} /></button>
           </div>
           <button className="nav-item muted-nav" onClick={() => setNotice('Settings will be available when accounts are implemented.')}><Settings2 size={18} /><span>Settings</span></button>
-          <div className="profile-row"><div className="profile-avatar">A</div><div className="profile-copy"><strong>Guest account</strong><span>Explore LIVE_TRON</span></div><MoreHorizontal size={19} /></div>
+          <div className="profile-row"><div className="profile-avatar">{creatorUser?.display_name.slice(0,1).toUpperCase() ?? 'A'}</div><div className="profile-copy"><strong>{creatorUser?.display_name ?? 'Guest account'}</strong><span>{creatorUser?.email ?? 'Explore LIVE_TRON'}</span></div><MoreHorizontal size={19} /></div>
         </div>
       </aside>
 
@@ -161,7 +165,7 @@ function App() {
           <div className="topbar-actions">
             <label className="search-box"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search streams, creators..." aria-label="Search streams and creators" /><kbd>⌘ K</kbd></label>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNotice('You are all caught up.') }><Bell size={19} /><i /></button>
-            <button className="top-avatar" aria-label="Guest profile">A</button>
+            <button className="top-avatar" aria-label="Open account and creator studio" onClick={() => setCreatorStudioOpen(true)}>{creatorUser?.display_name.slice(0,1).toUpperCase() ?? 'A'}</button>
           </div>
         </header>
 
@@ -194,7 +198,7 @@ function App() {
           </section>
         ) : (
           <div className="content-wrap">
-            <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> THE LIVE NETWORK</div><h1>Find your <span>live.</span></h1><p>Real-time moments. Communities worth staying for.</p></div><button className="go-live-button" onClick={() => setNotice('Creator Studio is being built. Broadcasting will be enabled after ingest and account services are ready.')}><Radio size={17} /> Go live <span className="go-live-arrow">↗</span></button></div>
+            <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> THE LIVE NETWORK</div><h1>Find your <span>live.</span></h1><p>Real-time moments. Communities worth staying for.</p></div><button className="go-live-button" onClick={() => setCreatorStudioOpen(true)}><Radio size={17} /> Go live <span className="go-live-arrow">↗</span></button></div>
 
             {featured && <section className="featured-section">
               <div className="section-heading"><div><span className="section-kicker">EDITOR'S PICK</span><h2>In the spotlight</h2></div><span className="updated-label"><span /> LIVE RIGHT NOW</span></div>
@@ -221,6 +225,7 @@ function App() {
           </div>
         )}
       </main>
+      <CreatorStudio open={creatorStudioOpen} user={creatorUser} onUserChange={setCreatorUser} onClose={() => setCreatorStudioOpen(false)} />
       {installState === 'available' && <div className="install-banner"><div><strong>Take LIVE_TRON with you</strong><span>Install the app for a focused, full-screen experience.</span></div><button onClick={installApp}>Install app</button><button className="dismiss-install" onClick={() => setInstallState('hidden')} aria-label="Dismiss install prompt"><X size={16} /></button></div>}
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={15} /></button></div>}
     </div>

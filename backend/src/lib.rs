@@ -164,6 +164,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creator_channel_listing_requires_authentication() {
+        let app = build_app(
+            AppState::default()
+                .with_jwt_secret(Some("test-jwt-secret-at-least-32-bytes-long".to_owned())),
+            &[],
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/me/channels")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn oversized_json_requests_are_rejected() {
         let app = build_app(AppState::default(), &[]);
         let payload = format!(r#"{{"email":"{}"}}"#, "a".repeat(65 * 1024));

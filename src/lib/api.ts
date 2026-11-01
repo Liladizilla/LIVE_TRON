@@ -1,6 +1,6 @@
 import type { Stream } from '../data'
 
-type ApiUser = {
+export type ApiUser = {
   id: string
   email: string
   display_name: string
@@ -142,6 +142,63 @@ export async function logoutAccount(): Promise<void> {
     accessToken = null
     refreshToken = null
   }
+}
+
+
+export type ApiChannel = {
+  id: string
+  owner_user_id: string
+  slug: string
+  title: string
+  description: string
+  category: string
+  is_mature: boolean
+  follower_count: number
+}
+
+export type CreatedStream = {
+  stream: ApiStream
+  publishing_key: string
+  publishing_key_notice: string
+}
+
+export async function fetchMyChannels(): Promise<ApiChannel[]> {
+  return authenticatedRequest<ApiChannel[]>('/v1/me/channels')
+}
+
+export async function createChannel(input: {
+  slug: string
+  title: string
+  description: string
+  category: string
+  is_mature: boolean
+}): Promise<ApiChannel> {
+  return authenticatedRequest<ApiChannel>('/v1/channels', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function createCreatorStream(
+  slug: string,
+  input: { title: string; category: string; visibility: 'public' | 'unlisted' | 'private' },
+): Promise<CreatedStream> {
+  return authenticatedRequest<CreatedStream>(`/v1/channels/${encodeURIComponent(slug)}/streams`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function rotatePublishingKey(streamId: string): Promise<{ publishing_key: string; notice: string }> {
+  return authenticatedRequest(`/v1/streams/${encodeURIComponent(streamId)}/publishing-key/rotate`, {
+    method: 'POST',
+  })
+}
+
+export async function revokePublishingKey(streamId: string): Promise<void> {
+  await authenticatedRequest<void>(`/v1/streams/${encodeURIComponent(streamId)}/publishing-key`, {
+    method: 'DELETE',
+  })
 }
 
 export async function fetchLiveStreams(options: { query?: string; category?: string; signal?: AbortSignal } = {}): Promise<ApiStream[]> {

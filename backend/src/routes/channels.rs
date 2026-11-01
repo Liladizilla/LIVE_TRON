@@ -253,6 +253,27 @@ pub async fn creator_profile(
     ))
 }
 
+pub async fn my_channels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ChannelView>>, ApiError> {
+    let owner = authenticated_user(&headers, &state)?;
+    let db = pool(&state)?;
+    let rows = sqlx::query_as::<_, ChannelView>(
+        "SELECT c.id, c.owner_user_id, c.slug, c.title, c.description, c.category, c.is_mature, (SELECT count(*) FROM follows f WHERE f.channel_id = c.id)::bigint AS follower_count FROM channels c WHERE c.owner_user_id = $1 ORDER BY c.created_at ASC"
+    )
+    .bind(owner)
+    .fetch_all(db)
+    .await
+    .map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "channel_discovery_failed",
+        )
+    })?;
+    Ok(Json(rows))
+}
+
 #[cfg(test)]
 mod tests {
     use super::valid_slug;
