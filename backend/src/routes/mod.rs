@@ -26,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/v1/auth/refresh", post(auth::refresh))
         .route("/v1/auth/logout", post(auth::logout))
         .route("/v1/me", get(auth::me).patch(auth::update_me))
+        .route("/v1/me/channels", get(channels::list_mine))
         .route("/v1/me/channels", get(channels::my_channels))
         .route(
             "/v1/channels",
