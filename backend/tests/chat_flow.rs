@@ -169,8 +169,7 @@ async fn persisted_chat_enforces_access_validation_and_rate_limits() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{limited}");
     assert_eq!(limited["error"], "chat_rate_limited");
 
-    let (status, history) =
-        request(&app, Method::GET, &chat_uri, None, None, None).await;
+    let (status, history) = request(&app, Method::GET, &chat_uri, None, None, None).await;
     assert_eq!(status, StatusCode::OK, "{history}");
     assert_eq!(history.as_array().unwrap().len(), 5);
     assert_eq!(history[0]["body"], "message 0");
