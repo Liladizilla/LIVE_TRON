@@ -142,7 +142,8 @@ mod tests {
     #[tokio::test]
     async fn mediamtx_auth_callback_rejects_a_wrong_shared_secret() {
         let app = build_app(
-            AppState::default().with_mediamtx_auth_secret(Some("correct-secret-value-32-bytes-long".to_owned())),
+            AppState::default()
+                .with_mediamtx_auth_secret(Some("correct-secret-value-32-bytes-long".to_owned())),
             &[],
         );
         let response = app
