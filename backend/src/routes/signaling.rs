@@ -5,7 +5,10 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
     },
-    http::{header::{ORIGIN, SEC_WEBSOCKET_PROTOCOL}, HeaderMap, StatusCode},
+    http::{
+        header::{ORIGIN, SEC_WEBSOCKET_PROTOCOL},
+        HeaderMap, StatusCode,
+    },
     response::Response,
     Json,
 };
@@ -13,9 +16,9 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use rand::{rngs::OsRng, RngCore};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -164,7 +167,6 @@ async fn stream_access(
     Ok(PeerRole::Viewer)
 }
 
-
 pub async fn create_ticket(
     State(state): State<AppState>,
     Path(stream_id): Path<Uuid>,
@@ -222,16 +224,25 @@ pub async fn connect(
         .map(str::trim)
         .find_map(|protocol| protocol.strip_prefix(SIGNAL_TICKET_PROTOCOL_PREFIX))
         .filter(|value| valid_signal_ticket(value))
-        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "missing_or_invalid_signal_ticket"))?;
+        .ok_or(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "missing_or_invalid_signal_ticket",
+        ))?;
     let ticket_hash = credential_hash(ticket);
     let ticket_record = state
         .signal_tickets
         .lock()
         .await
         .remove(&ticket_hash)
-        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"))?;
+        .ok_or(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "signal_ticket_expired_or_used",
+        ))?;
     if ticket_record.stream_id != stream_id || ticket_record.expires_at <= Instant::now() {
-        return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"));
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "signal_ticket_expired_or_used",
+        ));
     }
     let role = if ticket_record.publisher {
         PeerRole::Publisher
