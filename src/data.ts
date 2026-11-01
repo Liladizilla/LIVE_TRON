@@ -6,7 +6,7 @@ export type Stream = {
   creator: string
   handle: string
   category: Exclude<Category, 'For you'>
-  viewers: number
+  viewers: number | null
   accent: string
   image: string
   avatar: string
@@ -29,5 +29,5 @@ export const streams: Stream[] = [
   { id: 's8', title: 'Sneaker restoration: bringing these back', creator: 'Sole Lab', handle: '@solelab', category: 'Commerce', viewers: 3240, accent: '#c9a77b', image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=1000&auto=format&fit=crop&q=85', avatar: 'SL', duration: '00:19:40', description: 'Restoration process, product details, and a live workshop.' },
 ]
 
-export const formatViewers = (count: number) =>
-  count >= 1000 ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}K` : String(count)
+export const formatViewers = (count: number | null) =>
+  count === null ? 'LIVE' : count >= 1000 ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}K` : String(count)
