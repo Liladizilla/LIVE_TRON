@@ -107,6 +107,7 @@ export default function LiveBroadcastPanel({
   const startBroadcast = async () => {
     if (activeRef.current || status === 'requesting' || status === 'connecting') return
     setError('')
+    let controller: AbortController | null = null
 
     try {
       if (!STREAM_ID_PATTERN.test(streamId)) throw new Error('A canonical LIVE_TRON stream ID is required.')
@@ -114,7 +115,7 @@ export default function LiveBroadcastPanel({
       if (!baseUrl.trim()) throw new Error('Media ingest is not configured. Set the MediaMTX base URL before broadcasting.')
 
       const endpoint = resolveWhipEndpoint(baseUrl, streamId)
-      const controller = new AbortController()
+      controller = new AbortController()
       requestRef.current = controller
       setStatus('requesting')
       const localStream = await navigator.mediaDevices.getUserMedia({
@@ -184,6 +185,7 @@ export default function LiveBroadcastPanel({
       activeRef.current = true
       setStatus(peer.connectionState === 'connected' ? 'live' : 'connecting')
     } catch (cause) {
+      if (controller?.signal.aborted) return
       await deleteSession()
       stopLocalMedia()
       setStatus('error')
