@@ -162,6 +162,10 @@ export type CreatedStream = {
   publishing_key_notice: string
 }
 
+export async function fetchMyChannels(): Promise<ApiChannel[]> {
+  return authenticatedRequest<ApiChannel[]>('/v1/me/channels')
+}
+
 export async function createChannel(input: {
   slug: string
   title: string
