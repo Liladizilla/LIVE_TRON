@@ -225,7 +225,7 @@ function App() {
           </div>
         )}
       </main>
-      {creatorStudioOpen && <CreatorStudio user={creatorUser} onUserChange={setCreatorUser} onClose={() => setCreatorStudioOpen(false)} />}
+      <CreatorStudio open={creatorStudioOpen} user={creatorUser} onUserChange={setCreatorUser} onClose={() => setCreatorStudioOpen(false)} />
       {installState === 'available' && <div className="install-banner"><div><strong>Take LIVE_TRON with you</strong><span>Install the app for a focused, full-screen experience.</span></div><button onClick={installApp}>Install app</button><button className="dismiss-install" onClick={() => setInstallState('hidden')} aria-label="Dismiss install prompt"><X size={16} /></button></div>}
       {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss notification"><X size={15} /></button></div>}
     </div>
