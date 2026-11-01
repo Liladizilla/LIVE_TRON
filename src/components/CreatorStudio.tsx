@@ -99,7 +99,7 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     }
   }
 
-  const submitChannel = async (event: React.FormEvent) => {
+  const submitChannel = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
     setError('')
@@ -153,12 +153,12 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     setError('')
     try {
       await logoutAccount()
-      onUserChange(null)
-      setChannel(null)
-      setCreated(null)
     } catch (cause) {
       setError(messageFor(cause))
     } finally {
+      onUserChange(null)
+      setChannel(null)
+      setCreated(null)
       setBusy(false)
     }
   }
