@@ -204,6 +204,27 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
       responses:
         "200": { description: Live public non-mature streams }
+  /v1/media/ice-config:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Return STUN servers and short-lived coturn REST credentials for the current account
+      responses:
+        "200": { description: ICE server configuration; TURN credentials expire after one hour }
+        "401": { description: Missing or invalid access token }
+  /v1/streams/{stream_id}/signal:
+    get:
+      summary: Upgrade to authenticated WebSocket signaling for one live stream
+      description: Use Authorization Bearer for viewers or Authorization Publish for the stream publishing key. Relays targeted offer, answer, and ICE messages only; it does not forward media.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "101": { description: WebSocket protocol live-tron.signal.v1 established }
+        "401": { description: Invalid account token or publishing key }
+        "403": { description: Browser Origin is not allowlisted }
+        "409": { description: Stream is not live or a publisher is already connected }
   /v1/streams/{stream_id}:
     parameters:
       - in: path
