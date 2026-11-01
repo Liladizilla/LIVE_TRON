@@ -48,6 +48,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
   useEffect(() => {
     let disposed = false
     let sessionUrl: string | null = null
+    const requestController = new AbortController()
     const peer = new RTCPeerConnection({ iceServers: resolvedIceServers })
     const receivedStream = new MediaStream()
 
@@ -131,9 +132,10 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
             'Content-Type': 'application/sdp',
           },
           body: localSdp,
+          signal: requestController.signal,
         })
 
-        if (!response.ok) {
+        if (response.status !== 201 && response.status !== 200) {
           if (response.status === 409) {
             throw new Error('This stream is not online yet. Try again when the creator is broadcasting.')
           }
@@ -145,8 +147,16 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
         const location = response.headers.get('Location')
         if (!location) throw new Error('Media server did not return a WHEP session location.')
-        sessionUrl = new URL(location, endpoint).toString()
+        const session = new URL(location, endpoint)
+        if (session.origin !== mediaOrigin.origin || session.username || session.password) {
+          throw new Error('Media server returned an unsafe cross-origin WHEP session URL; refusing to manage that session.')
+        }
+        sessionUrl = session.toString()
 
+        const contentType = response.headers.get('Content-Type') ?? ''
+        if (!contentType.toLowerCase().includes('application/sdp')) {
+          throw new Error('Media server returned an unexpected WHEP response type instead of SDP.')
+        }
         const answer = await response.text()
         if (disposed) {
           removeSession()
@@ -166,6 +176,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
     return () => {
       disposed = true
+      requestController.abort()
       peer.removeEventListener('track', attachTrack)
       peer.close()
       const video = videoRef.current
