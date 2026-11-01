@@ -81,6 +81,7 @@ The API and migration runner load `backend/.env` automatically when started from
 | POST | `/v1/channels/:slug/follow` | Bearer | Follow a channel |
 | DELETE | `/v1/channels/:slug/follow` | Bearer | Unfollow a channel |
 | GET | `/v1/creators/:slug` | Public | Read creator profile and channels |
+| GET | `/v1/channels/:slug/streams` | Owner bearer | List streams owned by a channel |
 | POST | `/v1/channels/:slug/streams` | Owner bearer | Create stream and receive one-time publishing key |
 | GET | `/v1/streams` | Public | Discover live, public, non-mature streams |
 | GET | `/v1/streams/:stream_id` | Public / owner | Read stream; private streams are owner-only |
