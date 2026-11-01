@@ -1,48 +1,41 @@
-# MediaMTX integration
+# MediaMTX lifecycle integration
 
-This directory contains the first real media-server integration boundary for LIVE_TRON.
+This directory contains the MediaMTX v1.21.3 WebRTC server baseline and LIVE_TRON lifecycle event bridge.
 
-## Why MediaMTX
+## Event flow
 
-MediaMTX is a standalone media router with WebRTC publishing and reading, WHIP/WHEP endpoints, and an external HTTP authorization callback. It is the first deployable media-plane adapter; the Rust signaling relay remains a separate realtime signaling feature and is not used as a media transport.
+MediaMTX v1.21.3 provides `runOnOnline` and `runOnOffline` path hooks. They are used here instead of the older `runOnReady` / `runOnNotReady` names.
 
-Pinned configuration target: MediaMTX **v1.21.3**. Re-check the upstream configuration reference before changing the image version.
+- `runOnOnline` invokes `live-tron-media-event.sh ingest_started $MTX_PATH`.
+- `runOnOffline` invokes `live-tron-media-event.sh ingest_ended $MTX_PATH`.
+- The script generates one UUID event ID per invocation, builds a JSON payload, and sends it to the existing authenticated `POST /internal/v1/media/events` API route.
+- Curl retries reuse the same payload and event ID, so the API's idempotency key remains stable during transient failures.
+- The API owns lifecycle transitions. A stream becomes `live` only after MediaMTX reports it online; it becomes `ended` when MediaMTX reports it offline.
 
-## Network contract
+## Runtime requirements
 
-1. Run MediaMTX and the LIVE_TRON API on the same private container/VPC network.
-2. The API must be reachable from MediaMTX as `http://live-tron-api:8080`. Change `authHTTPAddress` only to the private service DNS name actually used by the deployment.
-3. Do not publish or proxy `/internal/v1/media/authorize` to the public internet. MediaMTX's HTTP-auth callback contract does not provide configurable custom headers, so configure a shared secret in the callback URL as a query parameter as well as keeping the route on a private network. Generate at least 32 random bytes and set the same value as `LIVE_TRON_MEDIAMTX_AUTH_SECRET` on the API and in MediaMTX's `MTX_AUTHHTTPADDRESS` override, for example:
+The MediaMTX container must provide:
+- `/bin/sh`
+- `curl`
+- `/proc/sys/kernel/random/uuid`
+- The mounted script at `/etc/mediamtx/live-tron-media-event.sh`, executable by the MediaMTX process.
 
-   ```sh
-   MTX_AUTHHTTPADDRESS="http://live-tron-api:8080/internal/v1/media/authorize?secret=$LIVE_TRON_MEDIAMTX_AUTH_SECRET"
-   ```
+Mount the script read-only and make it executable in the image or host filesystem. The official MediaMTX image contents can vary by packaging; verify these runtime dependencies rather than assuming they exist.
 
-   Do not place the secret in source control, shell history, public logs, or a public URL.
-4. Expose the WebRTC HTTP listener on TCP 8889 through an HTTPS reverse proxy, and expose UDP 8189 directly for ICE media. Configure `MTX_WEBRTCADDITIONALHOSTS` to the public DNS name or public IP advertised to clients.
-5. Do not expose the MediaMTX Control API, metrics, or pprof endpoints.
+Set these environment variables in the MediaMTX container:
+- `LIVE_TRON_MEDIA_EVENT_SECRET`: same value as API `LIVE_TRON_MEDIA_EVENT_SECRET` (minimum 32 bytes).
+- `LIVE_TRON_MEDIA_EVENT_URL`: optional private API URL; defaults to `http://live-tron-api:8080/internal/v1/media/events`.
 
-## Publish and read contract
+Also set `LIVE_TRON_MEDIAMTX_AUTH_SECRET` on the API and provide the same value in `authHTTPAddress` as shown in `mediamtx.yml`. Never commit real secrets. Do not expose either internal callback to public ingress.
 
-- Stream path is the canonical stream UUID, for example `<stream-uuid>`.
-- Publish with WHIP at `https://media.example.com/<stream-uuid>/whip`. Send the one-time LIVE_TRON publishing key as an `Authorization: Bearer <publishing-key>` token.
-- Read with WHEP at `https://media.example.com/<stream-uuid>/whep`. The initial callback authorizes only streams that are already `live`, `public`, and non-mature.
-- The callback validates publishing keys against the existing SHA-256 hashes and current revocation state. A rotated or revoked key is rejected on the next MediaMTX authorization request.
-- Private and unlisted playback are intentionally denied until a short-lived viewer media-token flow is implemented.
+## Failure behavior
 
-## Lifecycle limitation
+The hook command exits non-zero if the API remains unavailable after retries. MediaMTX logs the command failure, but the stream itself is not forcibly disconnected by this callback. Alert on failed lifecycle delivery and reconcile stream status against MediaMTX's actual online state. The API event endpoint is idempotent for repeated event IDs and rejects invalid lifecycle transitions.
 
-This adapter does **not** yet automatically translate MediaMTX online/offline events into LIVE_TRON lifecycle callbacks. The existing API only marks a stream live after a trusted `ingest_started` event. Do not manually mark streams live as a workaround and do not advertise this integration as production-ready until the lifecycle event bridge, TURN reachability, TLS routing, and end-to-end WHIP-to-WHEP tests are in place.
+## Networking
 
-## Local configuration validation
+Expose the WebRTC HTTP listener on TCP 8889 through an HTTPS reverse proxy, and expose UDP 8189 for ICE media. Set `MTX_WEBRTCADDITIONALHOSTS` to the public DNS name or IP advertised to clients. Configure TURN for restrictive NATs and mobile networks. Keep the auth and event callback routes private.
 
-Use the exact pinned image to validate the config before deployment:
+## Validation
 
-```sh
-docker run --rm \
-  -v "$PWD/deploy/mediamtx:/etc/mediamtx:ro" \
-  bluenviron/mediamtx:1.21.3 \
-  --validate-conf=/etc/mediamtx/mediamtx.yml
-```
-
-This check validates MediaMTX's config syntax only. It does not prove network reachability, authentication, ingest, or playback.
+The CI job validates the MediaMTX v1.21.3 configuration and checks the lifecycle hook script with `sh -n`. These checks validate syntax only; they do not prove deployment reachability or successful WHIP-to-WHEP playback.
