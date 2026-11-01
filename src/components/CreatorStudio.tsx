@@ -5,12 +5,15 @@ import {
   ApiError,
   createChannel,
   createCreatorStream,
+  fetchCreatorStreams,
   fetchMyChannels,
   isApiConfigured,
   loginAccount,
   logoutAccount,
   registerAccount,
+  rotatePublishingKey,
   type ApiChannel,
+  type ApiStream,
   type ApiUser,
   type CreatedStream,
 } from '../lib/api'
@@ -54,6 +57,10 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
   const [channelsLoading, setChannelsLoading] = useState(false)
   const [channelsLoadFailed, setChannelsLoadFailed] = useState(false)
   const [channelReload, setChannelReload] = useState(0)
+  const [creatorStreams, setCreatorStreams] = useState<ApiStream[]>([])
+  const [streamsLoading, setStreamsLoading] = useState(false)
+  const [streamsLoadFailed, setStreamsLoadFailed] = useState(false)
+  const [streamsReload, setStreamsReload] = useState(0)
   const [slug, setSlug] = useState('')
   const [channelTitle, setChannelTitle] = useState('')
   const [channelDescription, setChannelDescription] = useState('')
@@ -81,6 +88,24 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     })
     return () => { active = false }
   }, [user, channelReload])
+
+  useEffect(() => {
+    if (!channel || !isApiConfigured()) return
+    let active = true
+    setStreamsLoading(true)
+    setStreamsLoadFailed(false)
+    fetchCreatorStreams(channel.slug).then((items) => {
+      if (active) setCreatorStreams(items)
+    }).catch((cause: unknown) => {
+      if (active) {
+        setStreamsLoadFailed(true)
+        setError(messageFor(cause))
+      }
+    }).finally(() => {
+      if (active) setStreamsLoading(false)
+    })
+    return () => { active = false }
+  }, [channel, streamsReload])
 
   if (!open) return null
 
@@ -142,6 +167,25 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
         visibility,
       })
       setCreated(result)
+      setStreamsReload((value) => value + 1)
+    } catch (cause) {
+      setError(messageFor(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const recoverPublishingKey = async (stream: ApiStream) => {
+    setBusy(true)
+    setError('')
+    setKeyCopied(false)
+    try {
+      const rotated = await rotatePublishingKey(stream.id)
+      setCreated({
+        stream,
+        publishing_key: rotated.publishing_key,
+        publishing_key_notice: rotated.notice,
+      })
     } catch (cause) {
       setError(messageFor(cause))
     } finally {
@@ -204,22 +248,33 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
         </form>) : <div className="studio-form">
           <div className="studio-step"><Check size={17} /> CHANNEL READY</div>
           <div className="studio-channel-summary"><strong>{channel.title}</strong><span>@{channel.slug} · {channel.category}</span></div>
-          {!created ? <form className="studio-form studio-nested" onSubmit={submitStream}>
-            <div className="studio-step"><Radio size={17} /> STEP 2 / STREAM</div>
-            <p className="studio-muted">Create a stream record and issue its one-time publishing key.</p>
-            <label>Stream title<input value={streamTitle} onChange={(event) => setStreamTitle(event.target.value)} minLength={2} maxLength={120} required /></label>
-            <label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item} value={item}>{item[0].toUpperCase()+item.slice(1)}</option>)}</select></label>
-            <label>Visibility<select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
-            {error && <p className="studio-error" role="alert">{error}</p>}
-            <button className="studio-primary" disabled={busy}>{busy ? 'Creating stream…' : 'Create stream & publishing key'}</button>
-          </form> : <div className="studio-key-section">
+          {!created ? <div className="studio-stream-manager">
+            <div className="studio-step"><Radio size={17} /> YOUR STREAMS</div>
+            {streamsLoading && <p className="studio-muted">Loading streams owned by this channel…</p>}
+            {streamsLoadFailed && <div className="studio-error" role="alert">{error}<button className="studio-text-button" type="button" onClick={() => setStreamsReload((value) => value + 1)}>Retry</button></div>}
+            {!streamsLoading && !streamsLoadFailed && creatorStreams.length === 0 && <p className="studio-muted">No streams have been created for this channel yet.</p>}
+            {creatorStreams.map((stream) => <div className="studio-stream-row" key={stream.id}>
+              <div><strong>{stream.title}</strong><span>{stream.category} · {stream.visibility}</span></div>
+              <span className={`studio-status studio-status-${stream.status}`}>{stream.status.toUpperCase()}</span>
+              {stream.status === 'created' ? <button type="button" className="studio-text-button" onClick={() => void recoverPublishingKey(stream)} disabled={busy}>{busy ? 'Working…' : 'Rotate / recover key'}</button> : <span className="studio-muted">{stream.status === 'live' ? 'Key rotation disabled while live' : 'Stream ended'}</span>}
+            </div>)}
+            <form className="studio-form studio-nested" onSubmit={submitStream}>
+              <div className="studio-step"><Radio size={17} /> CREATE ANOTHER STREAM</div>
+              <label>Stream title<input value={streamTitle} onChange={(event) => setStreamTitle(event.target.value)} minLength={2} maxLength={120} required /></label>
+              <label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item} value={item}>{item[0].toUpperCase()+item.slice(1)}</option>)}</select></label>
+              <label>Visibility<select value={visibility} onChange={(event) => setVisibility(event.target.value as typeof visibility)}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label>
+              {error && !streamsLoadFailed && <p className="studio-error" role="alert">{error}</p>}
+              <button className="studio-primary" disabled={busy || streamsLoading}>{busy ? 'Creating stream…' : 'Create stream & publishing key'}</button>
+            </form>
+          </div> : <div className="studio-key-section">
             <div className="studio-step"><Shield size={17} /> PUBLISHING CREDENTIAL</div>
-            <p className="studio-warning">This key is shown once. Copy it now and keep it private. Closing this window loses the plaintext key.</p>
+            <p className="studio-warning">This key is shown once. Copy it now and keep it private. It is never stored in browser storage.</p>
             <div className="studio-key-value"><code>{created.publishing_key}</code><button onClick={copyKey} aria-label="Copy publishing key"><Copy size={16} /></button></div>
             {keyCopied && <p className="studio-success"><Check size={14} /> Copied to clipboard</p>}
             <p className="studio-muted">{created.publishing_key_notice}</p>
-            <div className="studio-stream-state"><span>STREAM CREATED</span><strong>{created.stream.title}</strong><small>Waiting for a publisher. This is not live yet.</small></div>
+            <div className="studio-stream-state"><span>STREAM STATUS: {created.stream.status.toUpperCase()}</span><strong>{created.stream.title}</strong><small>{created.stream.status === 'live' ? 'This stream is live.' : 'Waiting for a publisher. This is not live yet.'}</small></div>
             <LiveBroadcastPanel streamId={created.stream.id} publishingKey={created.publishing_key} />
+            <button type="button" className="studio-text-button" onClick={() => { setCreated(null); setKeyCopied(false); setStreamsReload((value) => value + 1) }}>Back to stream management</button>
           </div>}
         </div>}
         {error && channel && created && <p className="studio-error" role="alert">{error}</p>}
