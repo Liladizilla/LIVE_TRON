@@ -82,7 +82,8 @@ pub async fn ice_config(
         state.ice.turn_shared_secret.as_deref(),
         state.ice.turn_urls.is_empty(),
     ) {
-        let (username, credential) = create_turn_credential(user_id, secret, Utc::now().timestamp())?;
+        let (username, credential) =
+            create_turn_credential(user_id, secret, Utc::now().timestamp())?;
         ice_servers.push(IceServer {
             urls: state.ice.turn_urls.clone(),
             username: Some(username),
@@ -161,7 +162,10 @@ pub async fn connect(
 ) -> Result<Response, ApiError> {
     if let Some(origin) = headers.get(ORIGIN).and_then(|value| value.to_str().ok()) {
         if !origin_is_allowed(origin, &state.allowed_origins) {
-            return Err(ApiError(StatusCode::FORBIDDEN, "websocket_origin_not_allowed"));
+            return Err(ApiError(
+                StatusCode::FORBIDDEN,
+                "websocket_origin_not_allowed",
+            ));
         }
     }
     let db = state.db.as_ref().ok_or(ApiError(
@@ -180,7 +184,10 @@ pub async fn connect(
         }
     });
     if role.is_publisher() && room.publisher.is_some() {
-        return Err(ApiError(StatusCode::CONFLICT, "publisher_already_connected"));
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "publisher_already_connected",
+        ));
     }
     let receiver = room.sender.subscribe();
     room.participants
@@ -226,7 +233,11 @@ async fn handle_socket(
         "protocol": "live-tron.signal.v1",
         "media_transport": "not_connected"
     });
-    if outgoing.send(Message::Text(hello.to_string().into())).await.is_err() {
+    if outgoing
+        .send(Message::Text(hello.to_string().into()))
+        .await
+        .is_err()
+    {
         cleanup_participant(&state, stream_id, participant_id, role).await;
         return;
     }
@@ -360,7 +371,9 @@ async fn cleanup_participant(
 
 #[cfg(test)]
 mod tests {
-    use super::{create_turn_credential, origin_is_allowed, valid_publish_key, valid_signal_kind, PeerRole};
+    use super::{
+        create_turn_credential, origin_is_allowed, valid_publish_key, valid_signal_kind, PeerRole,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -385,7 +398,8 @@ mod tests {
     fn turn_credentials_are_ephemeral_and_bound_to_user_identity() {
         let user_id = Uuid::new_v4();
         let secret = "a-long-turn-rest-shared-secret-for-tests";
-        let (username, credential) = create_turn_credential(user_id, secret, 1_800_000_000).unwrap();
+        let (username, credential) =
+            create_turn_credential(user_id, secret, 1_800_000_000).unwrap();
         assert_eq!(username, format!("1800003600:{user_id}"));
         assert!(!credential.is_empty());
         assert_ne!(credential, secret);
@@ -399,7 +413,10 @@ mod tests {
         let allowed = vec!["https://live.example".to_owned()];
         assert!(origin_is_allowed("https://live.example", &allowed));
         assert!(!origin_is_allowed("https://evil.example", &allowed));
-        assert!(!origin_is_allowed("https://live.example.evil.test", &allowed));
+        assert!(!origin_is_allowed(
+            "https://live.example.evil.test",
+            &allowed
+        ));
         assert!(!origin_is_allowed("https://live.example", &[]));
     }
 }
