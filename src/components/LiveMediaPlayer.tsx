@@ -5,6 +5,7 @@ type PlayerStatus = 'idle' | 'connecting' | 'live' | 'error'
 type LiveMediaPlayerProps = {
   streamId: string
   mediaServerUrl?: string
+  iceServers?: RTCIceServer[]
 }
 
 const STREAM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -30,7 +31,7 @@ function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
   })
 }
 
-export default function LiveMediaPlayer({ streamId, mediaServerUrl }: LiveMediaPlayerProps) {
+export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }: LiveMediaPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [status, setStatus] = useState<PlayerStatus>('idle')
   const [error, setError] = useState('')
@@ -42,7 +43,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl }: LiveMediaP
   useEffect(() => {
     let disposed = false
     let sessionUrl: string | null = null
-    const peer = new RTCPeerConnection()
+    const peer = new RTCPeerConnection({ iceServers: resolvedIceServers })
     const receivedStream = new MediaStream()
 
     const removeSession = () => {
@@ -162,7 +163,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl }: LiveMediaP
       removeSession()
       receivedStream.getTracks().forEach((track) => track.stop())
     }
-  }, [baseUrl, retryCount, streamId])
+  }, [baseUrl, resolvedIceServers, retryCount, streamId])
 
   return (
     <div className="watch-player live-media-player">
