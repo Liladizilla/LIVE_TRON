@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Copy, LogIn, Radio, Shield, Video, X } from 'lucide-react'
 import LiveBroadcastPanel from './LiveBroadcastPanel'
 import {
   ApiError,
   createChannel,
   createCreatorStream,
+  fetchMyChannels,
   isApiConfigured,
   loginAccount,
   logoutAccount,
@@ -19,6 +20,7 @@ type Props = {
   user: ApiUser | null
   onUserChange: (user: ApiUser | null) => void
   onClose: () => void
+  open: boolean
 }
 
 const categories = ['gaming', 'music', 'talk', 'education', 'sports', 'irl', 'commerce']
@@ -41,7 +43,7 @@ function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong. Try again.'
 }
 
-export default function CreatorStudio({ user, onUserChange, onClose }: Props) {
+export default function CreatorStudio({ user, onUserChange, onClose, open }: Props) {
   const [registerMode, setRegisterMode] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -57,6 +59,19 @@ export default function CreatorStudio({ user, onUserChange, onClose }: Props) {
   const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public')
   const [created, setCreated] = useState<CreatedStream | null>(null)
   const [keyCopied, setKeyCopied] = useState(false)
+
+  useEffect(() => {
+    if (!user || !isApiConfigured()) return
+    let active = true
+    fetchMyChannels().then((items) => {
+      if (active && items.length > 0) setChannel(items[0])
+    }).catch((cause: unknown) => {
+      if (active) setError(messageFor(cause))
+    })
+    return () => { active = false }
+  }, [user])
+
+  if (!open) return null
 
   if (!isApiConfigured()) {
     return <div className="studio-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
