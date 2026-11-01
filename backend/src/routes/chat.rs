@@ -277,6 +277,7 @@ async fn handle_chat_socket(
         "participants": sender.receiver_count()
     });
     if outgoing.send(Message::Text(ready.to_string().into())).await.is_err() {
+        drop(receiver);
         drop(sender);
         cleanup_chat_room(&state, stream_id).await;
         return;
