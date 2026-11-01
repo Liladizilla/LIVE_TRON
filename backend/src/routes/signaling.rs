@@ -193,11 +193,26 @@ pub async fn create_ticket(
             "signal_ticket_capacity_reached",
         ));
     }
+    let authorization = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let (publisher_key_hash, viewer_user_id) = if role.is_publisher() {
+        let key = authorization.strip_prefix("Publish ").ok_or(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "invalid_publishing_key",
+        ))?;
+        (Some(credential_hash(key)), None)
+    } else {
+        (None, Some(authenticated_user(&headers, &state)?))
+    };
     tickets.insert(
         ticket_hash,
         SignalTicket {
             stream_id,
             publisher: role.is_publisher(),
+            publisher_key_hash,
+            viewer_user_id,
             expires_at: Instant::now() + Duration::from_secs(SIGNAL_TICKET_TTL_SECONDS),
         },
     );
@@ -253,6 +268,49 @@ pub async fn connect(
             StatusCode::UNAUTHORIZED,
             "signal_ticket_expired_or_used",
         ));
+    }
+    let db = state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))?;
+    let still_authorized = if ticket_record.publisher {
+        let Some(key_hash) = ticket_record.publisher_key_hash.as_deref() else {
+            return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"));
+        };
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM streams s JOIN stream_publish_credentials c ON c.stream_id = s.id WHERE s.id = $1 AND s.status IN ('created', 'live') AND c.key_hash = $2 AND c.revoked_at IS NULL)",
+        )
+        .bind(stream_id)
+        .bind(key_hash)
+        .fetch_one(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?
+    } else {
+        let Some(viewer_id) = ticket_record.viewer_user_id else {
+            return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"));
+        };
+        let stream = sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT c.owner_user_id, s.status, s.visibility FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1",
+        )
+        .bind(stream_id)
+        .fetch_optional(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?;
+        let account_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)",
+        )
+        .bind(viewer_id)
+        .fetch_one(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?;
+        stream.is_some_and(|(owner_id, status, visibility)| {
+            account_exists
+                && status == "live"
+                && (visibility != "private" || viewer_id == owner_id)
+        })
+    };
+    if !still_authorized {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_access_revoked"));
     }
     let role = if ticket_record.publisher {
         PeerRole::Publisher
