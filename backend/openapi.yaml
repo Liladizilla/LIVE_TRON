@@ -244,6 +244,34 @@ paths:
         "404": { description: Stream not found or not accessible }
         "409": { description: Stream is not live }
         "429": { description: Chat rate limit exceeded }
+  /v1/streams/{stream_id}/chat-ticket:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create a one-use ticket for live chat WebSocket access
+      description: Tickets are bound to the authenticated user and stream, expire after 60 seconds, and are consumed during the WebSocket handshake.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Short-lived chat ticket }
+        "401": { description: Authentication required }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+  /v1/streams/{stream_id}/chat-socket:
+    get:
+      summary: Connect to live chat events
+      description: WebSocket endpoint. The client must offer live-tron.chat.v1 and live-tron.chat.ticket.{ticket} subprotocols. The server emits ready, message, and resync_required events. Browser Origin must be allowlisted.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "101": { description: WebSocket upgrade accepted }
+        "401": { description: Missing, expired, or consumed ticket }
+        "403": { description: Origin is not allowed }
   /internal/v1/media/events:
     post:
       summary: Trusted MediaMTX online/offline lifecycle callback
