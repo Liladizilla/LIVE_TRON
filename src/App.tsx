@@ -117,6 +117,9 @@ function App() {
             if (payload.type === 'message' && payload.message) {
               mergeMessages([payload.message])
               setChatStatus('Connected · messages arrive live')
+            } else if (payload.type === 'message_deleted' && typeof (payload as { message_id?: unknown }).message_id === 'string') {
+              const messageId = (payload as { message_id: string }).message_id
+              setChatMessages((current) => current.filter((item) => item.id !== messageId))
             } else if (payload.type === 'presence' && typeof (payload as { participants?: unknown }).participants === 'number') {
               const participants = (payload as { participants: number }).participants
               setChatStatus(`Live chat · ${participants} connected`)
