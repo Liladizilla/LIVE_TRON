@@ -12,7 +12,13 @@ Pinned configuration target: MediaMTX **v1.21.3**. Re-check the upstream configu
 
 1. Run MediaMTX and the LIVE_TRON API on the same private container/VPC network.
 2. The API must be reachable from MediaMTX as `http://live-tron-api:8080`. Change `authHTTPAddress` only to the private service DNS name actually used by the deployment.
-3. Do not publish or proxy `/internal/v1/media/authorize` to the public internet. The callback deliberately has no second shared-secret header because MediaMTX's HTTP-auth callback contract does not provide configurable custom headers. Network isolation is therefore mandatory.
+3. Do not publish or proxy `/internal/v1/media/authorize` to the public internet. MediaMTX's HTTP-auth callback contract does not provide configurable custom headers, so configure a shared secret in the callback URL as a query parameter as well as keeping the route on a private network. Generate at least 32 random bytes and set the same value as `LIVE_TRON_MEDIAMTX_AUTH_SECRET` on the API and in MediaMTX's `MTX_AUTHHTTPADDRESS` override, for example:
+
+   ```sh
+   MTX_AUTHHTTPADDRESS="http://live-tron-api:8080/internal/v1/media/authorize?secret=$LIVE_TRON_MEDIAMTX_AUTH_SECRET"
+   ```
+
+   Do not place the secret in source control, shell history, public logs, or a public URL.
 4. Expose the WebRTC HTTP listener on TCP 8889 through an HTTPS reverse proxy, and expose UDP 8189 directly for ICE media. Configure `MTX_WEBRTCADDITIONALHOSTS` to the public DNS name or public IP advertised to clients.
 5. Do not expose the MediaMTX Control API, metrics, or pprof endpoints.
 
