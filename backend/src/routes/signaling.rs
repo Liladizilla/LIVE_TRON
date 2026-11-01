@@ -28,6 +28,9 @@ use uuid::Uuid;
 const MAX_SIGNAL_BYTES: usize = 16 * 1024;
 const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
 const SIGNAL_TICKET_TTL_SECONDS: u64 = 60;
+const MAX_SIGNAL_TICKETS: usize = 10_000;
+const MAX_ROOM_PARTICIPANTS: usize = 256;
+const MAX_SIGNAL_MESSAGES_PER_SECOND: u32 = 60;
 const SIGNAL_TICKET_PROTOCOL_PREFIX: &str = "live-tron.ticket.";
 type HmacSha1 = Hmac<Sha1>;
 
@@ -183,6 +186,12 @@ pub async fn create_ticket(
     let ticket_hash = credential_hash(&ticket);
     let mut tickets = state.signal_tickets.lock().await;
     tickets.retain(|_, existing| existing.expires_at > Instant::now());
+    if tickets.len() >= MAX_SIGNAL_TICKETS {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "signal_ticket_capacity_reached",
+        ));
+    }
     tickets.insert(
         ticket_hash,
         SignalTicket {
@@ -265,6 +274,12 @@ pub async fn connect(
             "publisher_already_connected",
         ));
     }
+    if room.participants.len() >= MAX_ROOM_PARTICIPANTS {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "signal_room_capacity_reached",
+        ));
+    }
     let receiver = room.sender.subscribe();
     room.participants
         .insert(participant_id, role.is_publisher());
@@ -318,6 +333,8 @@ async fn handle_socket(
         cleanup_participant(&state, stream_id, participant_id, role).await;
         return;
     }
+    let mut signal_window = Instant::now();
+    let mut signal_count = 0_u32;
     let joined = json!({
         "type": "peer_joined",
         "from": participant_id,
@@ -331,6 +348,15 @@ async fn handle_socket(
                 let Some(Ok(message)) = incoming_message else { break };
                 match message {
                     Message::Text(text) => {
+                        if signal_window.elapsed() >= Duration::from_secs(1) {
+                            signal_window = Instant::now();
+                            signal_count = 0;
+                        }
+                        signal_count = signal_count.saturating_add(1);
+                        if signal_count > MAX_SIGNAL_MESSAGES_PER_SECOND {
+                            let _ = outgoing.send(Message::Text(json!({"type":"error","error":"signal_rate_limit_exceeded"}).to_string().into())).await;
+                            continue;
+                        }
                         if text.len() > MAX_SIGNAL_BYTES {
                             let _ = outgoing.send(Message::Close(None)).await;
                             break;
