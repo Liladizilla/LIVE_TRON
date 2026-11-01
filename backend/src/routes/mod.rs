@@ -1,8 +1,8 @@
 pub mod auth;
 pub mod channels;
 mod health;
-mod meta;
 mod media_auth;
+mod meta;
 pub mod signaling;
 pub mod streams;
 
