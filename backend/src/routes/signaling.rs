@@ -232,13 +232,11 @@ pub async fn connect(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    if let Some(origin) = headers.get(ORIGIN).and_then(|value| value.to_str().ok()) {
-        if !origin_is_allowed(origin, &state.allowed_origins) {
-            return Err(ApiError(
-                StatusCode::FORBIDDEN,
-                "websocket_origin_not_allowed",
-            ));
-        }
+    if !request_origin_is_allowed(&headers, &state.allowed_origins) {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "websocket_origin_not_allowed",
+        ));
     }
     let protocols = headers
         .get(SEC_WEBSOCKET_PROTOCOL)
@@ -508,6 +506,15 @@ fn origin_is_allowed(origin: &str, allowed_origins: &[String]) -> bool {
     allowed_origins.iter().any(|allowed| allowed == origin)
 }
 
+// Browser WebSocket requests must carry an Origin header. Treat a missing,
+// malformed, or unlisted origin as a denial instead of silently allowing it.
+fn request_origin_is_allowed(headers: &HeaderMap, allowed_origins: &[String]) -> bool {
+    headers
+        .get(ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|origin| origin_is_allowed(origin, allowed_origins))
+}
+
 fn valid_signal_kind(kind: &str, role: PeerRole) -> bool {
     match kind {
         "offer" | "renegotiate" => role == PeerRole::Publisher,
@@ -592,5 +599,40 @@ mod tests {
             &allowed
         ));
         assert!(!origin_is_allowed("https://live.example", &[]));
+    }
+
+    #[test]
+    fn websocket_requests_without_origin_are_rejected() {
+        use axum::http::HeaderMap;
+        let headers = HeaderMap::new();
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_invalid_origin_encoding_are_rejected() {
+        use axum::http::{header::ORIGIN, HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, HeaderValue::from_bytes(&[0xff]).unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_unlisted_origin_are_rejected() {
+        use axum::http::{header::ORIGIN, HeaderMap};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, "https://attacker.example".parse().unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_allowlisted_origin_are_accepted() {
+        use axum::http::{header::ORIGIN, HeaderMap};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, "https://live.example".parse().unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(super::request_origin_is_allowed(&headers, &allowed));
     }
 }
