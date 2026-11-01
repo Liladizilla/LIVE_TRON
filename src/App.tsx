@@ -196,13 +196,13 @@ function App() {
           <div className="content-wrap">
             <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" /> THE LIVE NETWORK</div><h1>Find your <span>live.</span></h1><p>Real-time moments. Communities worth staying for.</p></div><button className="go-live-button" onClick={() => setNotice('Creator Studio is being built. Broadcasting will be enabled after ingest and account services are ready.')}><Radio size={17} /> Go live <span className="go-live-arrow">↗</span></button></div>
 
-            <section className="featured-section">
+            {featured && <section className="featured-section">
               <div className="section-heading"><div><span className="section-kicker">EDITOR'S PICK</span><h2>In the spotlight</h2></div><span className="updated-label"><span /> LIVE RIGHT NOW</span></div>
               <article className="featured-card" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,10,14,.96) 0%, rgba(8,10,14,.78) 39%, rgba(8,10,14,.08) 100%), linear-gradient(0deg, rgba(8,10,14,.42), transparent 55%), url("${featured.image}")` }}>
                 <div className="featured-content"><div className="featured-meta"><span className="live-pill"><i /> LIVE</span><span>{featured.category}</span><span className="meta-separator">/</span><span>{formatViewers(featured.viewers)} watching</span></div><h2>{featured.title}</h2><p>{featured.description}</p><div className="featured-creator"><div className="mini-avatar" style={{ background: featured.accent }}>{featured.avatar}</div><strong>{featured.creator}</strong>{featured.verified && <ShieldCheck size={15} />}</div><div className="featured-actions"><button className="watch-button" onClick={() => openStream(featured)}><Play size={15} fill="currentColor" /> Watch live</button><button className="save-button" onClick={() => toggleSave(featured)}><Bookmark size={16} /> {saved.includes(featured.id) ? 'Saved' : 'Save for later'}</button></div></div>
                 <div className="featured-index"><span>01</span><i /><span>08</span></div>
               </article>
-            </section>
+            </section>}
 
             <section className="discovery-section">
               <div className="section-heading discovery-heading"><div><span className="section-kicker">YOUR NEXT OBSESSION</span><h2>Explore live channels</h2></div><button className="sort-button" onClick={() => setNotice('Streams are currently sorted by a curated discovery order.')} >Recommended <ChevronDown size={15} /></button></div>
@@ -211,6 +211,7 @@ function App() {
               {apiError && <div className="results-label" role="alert">Live discovery unavailable: {apiError}</div>}
               {isApiConfigured() && !apiLoading && !apiError && filteredStreams.length === 0 && <div className="results-label">No public live broadcasts are available right now.</div>}
               {query && <div className="results-label">{filteredStreams.length} result(s) for <strong>“{query}”</strong></div>}
+              {apiLoading && !apiStreams && <div className="empty-state"><strong>Connecting to LIVE_TRON</strong><span>Loading public broadcasts from the API.</span></div>}
               {visibleStreams.length ? <div className="stream-grid">{visibleStreams.map((stream) => <article className="stream-card" key={stream.id}>
                 <button className="stream-thumbnail" style={{ backgroundImage: `linear-gradient(0deg, rgba(0,0,0,.58), transparent 55%), url("${stream.image}")` }} onClick={() => openStream(stream)} aria-label={`Watch ${stream.title}`}><span className="live-pill"><i /> LIVE</span><span className="thumbnail-duration">{stream.duration}</span><span className="thumbnail-play"><Play size={18} fill="currentColor" /></span><span className="thumbnail-viewers"><span /> {formatViewers(stream.viewers)} watching</span></button>
                 <div className="stream-info"><div className="stream-avatar" style={{ background: stream.accent }}>{stream.avatar}</div><div className="stream-copy"><button className="stream-title" onClick={() => openStream(stream)}>{stream.title}</button><div className="stream-creator">{stream.creator} {stream.verified && <ShieldCheck size={13} />}</div><div className="stream-category">{stream.category} <span>·</span> {formatViewers(stream.viewers)} watching</div></div><button className={saved.includes(stream.id) ? 'card-more saved' : 'card-more'} onClick={() => toggleSave(stream)} aria-label="Save stream"><Bookmark size={17} /></button></div>
