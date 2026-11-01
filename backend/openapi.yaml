@@ -211,10 +211,22 @@ paths:
       responses:
         "200": { description: ICE server configuration; TURN credentials expire after one hour }
         "401": { description: Missing or invalid access token }
+  /v1/streams/{stream_id}/signal-ticket:
+    post:
+      summary: Create a one-use 60-second WebSocket ticket after bearer or publishing-key authentication
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: One-time ticket and browser WebSocket subprotocol list }
+        "401": { description: Invalid account token or publishing key }
+        "409": { description: Viewer cannot join before stream is live }
   /v1/streams/{stream_id}/signal:
     get:
       summary: Upgrade to authenticated WebSocket signaling for one live stream
-      description: Use Authorization Bearer for viewers or Authorization Publish for the stream publishing key. Relays targeted offer, answer, and ICE messages only; it does not forward media.
+      description: Requires a one-use ticket in the Sec-WebSocket-Protocol header, created by the signal-ticket endpoint. Relays targeted offer, answer, and ICE messages only; it does not forward media.
       parameters:
         - in: path
           name: stream_id
