@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchIceConfig } from '../lib/api'
+import { fetchIceConfig, fetchMediaReadToken } from '../lib/api'
 
 type PlayerStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -127,12 +127,20 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
           throw new Error('The MediaMTX base URL must be a clean origin without credentials or query parameters.')
         }
         const endpoint = `${mediaOrigin.origin}/${encodeURIComponent(streamId)}/whep`
+        let mediaToken: string | null = null
         try {
           const authenticatedIceServers = await fetchIceConfig(requestController.signal)
           if (!disposed) peer.setConfiguration({ iceServers: authenticatedIceServers })
         } catch (iceError) {
           if (requestController.signal.aborted) throw iceError
-          // Public viewers can still attempt direct ICE with the configured STUN fallback.
+          // Anonymous viewers can still attempt direct ICE with the configured STUN fallback.
+        }
+        try {
+          const grant = await fetchMediaReadToken(streamId, requestController.signal)
+          mediaToken = grant.token
+        } catch (tokenError) {
+          if (requestController.signal.aborted) throw tokenError
+          // Public and unlisted streams remain readable without an authenticated token.
         }
         if (disposed) return
         const offer = await peer.createOffer()
@@ -148,6 +156,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
           headers: {
             Accept: 'application/sdp',
             'Content-Type': 'application/sdp',
+            ...(mediaToken ? { Authorization: `Bearer ${mediaToken}` } : {}),
           },
           body: localSdp,
           signal: requestController.signal,
