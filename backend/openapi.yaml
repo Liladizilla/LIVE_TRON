@@ -204,6 +204,46 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
       responses:
         "200": { description: Live public non-mature streams }
+  /v1/streams/{stream_id}/chat:
+    parameters:
+      - in: path
+        name: stream_id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read recent messages for a live stream
+      description: Returns up to 100 newest messages in chronological order. Private streams are visible only to their owner.
+      parameters:
+        - in: query
+          name: before
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { description: Chat messages }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Send a chat message to a live stream
+      description: Requires an account. Message body is trimmed, limited to 500 characters, and rate limited to five messages per user per stream every ten seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "201": { description: Persisted chat message }
+        "400": { description: Empty or oversized message }
+        "401": { description: Missing or invalid access token }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+        "429": { description: Chat rate limit exceeded }
   /internal/v1/media/events:
     post:
       summary: Trusted MediaMTX online/offline lifecycle callback
