@@ -210,8 +210,8 @@ export default function LiveBroadcastPanel({
     else setCameraEnabled(enabled)
   }
 
-  const broadcasting = status === 'live' || status === 'connecting'
   const isLive = status === 'live'
+  const isConnecting = status === 'requesting' || status === 'connecting'
 
   return (
     <section className="broadcast-panel" aria-label="Live broadcast controls">
@@ -233,11 +233,11 @@ export default function LiveBroadcastPanel({
           <button type="button" onClick={() => setTrackEnabled('audio', !microphoneEnabled)} disabled={!streamRef.current}>
             {microphoneEnabled ? 'Mic on' : 'Mic off'}
           </button>
-          {broadcasting ? (
+          {isLive ? (
             <button type="button" className="broadcast-stop" onClick={() => void stopBroadcast()}>End broadcast</button>
           ) : (
-            <button type="button" className="broadcast-start" onClick={() => void startBroadcast()} disabled={status === 'requesting' || status === 'stopping'}>
-              {status === 'requesting' ? 'Requesting devices…' : status === 'connecting' ? 'Connecting…' : status === 'stopping' ? 'Stopping…' : status === 'error' ? 'Retry broadcast' : 'Start broadcast'}
+            <button type="button" className="broadcast-start" onClick={() => void startBroadcast()} disabled={isConnecting || status === 'stopping'}>
+              {status === 'requesting' ? 'Requesting devices…' : isConnecting ? 'Connecting…' : status === 'stopping' ? 'Stopping…' : status === 'error' ? 'Retry broadcast' : 'Start broadcast'}
             </button>
           )}
         </div>
