@@ -331,3 +331,28 @@ export async function connectStreamChatSocket(streamId: string): Promise<WebSock
   })
   return socket
 }
+
+export async function setStreamChatRestriction(
+  streamId: string,
+  userId: string,
+  input: { kind: 'mute' | 'ban'; duration_seconds: number; reason?: string },
+): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-restrictions/${encodeURIComponent(userId)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  )
+}
+
+export async function removeStreamChatRestriction(streamId: string, userId: string): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-restrictions/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function deleteStreamChatMessage(streamId: string, messageId: string): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-messages/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' },
+  )
+}
