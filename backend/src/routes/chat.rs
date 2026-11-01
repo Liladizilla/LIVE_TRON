@@ -436,7 +436,6 @@ mod websocket_origin_tests {
     }
 }
 
-
 #[derive(Deserialize)]
 pub struct SetChatRestriction {
     kind: String,
@@ -444,11 +443,7 @@ pub struct SetChatRestriction {
     reason: Option<String>,
 }
 
-async fn ensure_stream_owner(
-    db: &PgPool,
-    stream_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), ApiError> {
+async fn ensure_stream_owner(db: &PgPool, stream_id: Uuid, user_id: Uuid) -> Result<(), ApiError> {
     let is_owner = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1 AND s.status = 'live' AND c.owner_user_id = $2)",
     )
@@ -475,19 +470,27 @@ pub async fn set_restriction(
     if !matches!(input.kind.as_str(), "mute" | "ban")
         || !(1..=86_400).contains(&input.duration_seconds)
     {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_chat_restriction"));
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "invalid_chat_restriction",
+        ));
     }
     let reason = input.reason.map(|value| value.trim().to_owned());
-    if reason.as_ref().is_some_and(|value| value.chars().count() > 240) {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "chat_restriction_reason_too_long"));
+    if reason
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 240)
+    {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "chat_restriction_reason_too_long",
+        ));
     }
-    let target_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)",
-    )
-    .bind(user_id)
-    .fetch_one(db)
-    .await
-    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_failed"))?;
+    let target_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+            .bind(user_id)
+            .fetch_one(db)
+            .await
+            .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_failed"))?;
     if !target_exists {
         return Err(ApiError(StatusCode::NOT_FOUND, "chat_user_not_found"));
     }
@@ -551,7 +554,8 @@ async fn publish_message_deleted(state: &AppState, stream_id: Uuid, message_id: 
     let payload = serde_json::json!({
         "type": "message_deleted",
         "message_id": message_id
-    }).to_string();
+    })
+    .to_string();
     let rooms = state.chat_rooms.lock().await;
     if let Some(sender) = rooms.get(&stream_id) {
         let _ = sender.send(payload);
