@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -439,6 +440,10 @@ fn create_turn_credential(
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "turn_credentials_failed"))?;
     mac.update(username.as_bytes());
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
+}
+
+fn valid_signal_ticket(ticket: &str) -> bool {
+    ticket.len() == 64 && ticket.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn origin_is_allowed(origin: &str, allowed_origins: &[String]) -> bool {
