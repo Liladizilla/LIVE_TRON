@@ -9,6 +9,7 @@
 ## Product direction
 
 - Responsive web application with an installable Progressive Web App (PWA).
+- Browser WHEP playback transport for canonical stream UUIDs, with SDP negotiation, connection-state handling, retry UI, and session deletion on teardown.
 - One discovery and viewing experience across desktop, tablet, and mobile.
 - Category-agnostic discovery, creator channels, live chat, and eventually interactive live experiences.
 - Premium dark visual system: graphite surfaces, restrained acid-lime accent, clear typography, low visual noise.
@@ -95,6 +96,12 @@ Protected endpoints require `Authorization: Bearer <access_token>`. Access token
 JSON request bodies are capped at 64 KiB. Registration requires an ASCII email with a valid dotted domain, display name (2–80 characters), and password (12–128 bytes). Login returns the same public error for unknown accounts and incorrect passwords, and performs a password-hash operation for unknown accounts to reduce timing-based account enumeration. Channel slugs are lowercase URL-safe segments with single hyphen separators. Refresh tokens must be 64 hexadecimal characters and are revoked on logout or successful rotation. The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
 
 OpenAPI contract: [backend/openapi.yaml](backend/openapi.yaml).
+
+### Browser WebRTC playback
+
+The watch page uses the WHEP player when the selected stream has a canonical UUID and `VITE_MEDIAMTX_WHEP_BASE_URL` is configured. Set that variable to the public HTTPS origin of MediaMTX (for example, `https://media.example.com`), and optionally set `VITE_MEDIAMTX_STUN_URLS` to a comma-separated STUN URL list. For authenticated TURN credentials, pass the ICE server list from the API to the player component. The player waits for ICE gathering, posts an SDP offer to `/<stream-uuid>/whep`, applies the SDP answer, and deletes the WHEP session when the player unmounts. It does not use the separate WebSocket signaling relay.
+
+The current discovery catalogue still contains preview/demo records with non-UUID IDs, so those records intentionally continue to show the preview. Playback activates for real stream records after the frontend is connected to the stream API. This player has not yet been verified against a deployed MediaMTX server.
 
 ## Database model
 
