@@ -8,6 +8,11 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 cat > "$tmp/curl" <<'MOCK_CURL'
 #!/bin/sh
 printf '%s\n' "$@" > "$CAPTURE"
+for arg in "$@"; do
+  case "$arg" in
+    @*) cat "${arg#@}" >> "$CAPTURE" ;;
+  esac
+done
 MOCK_CURL
 chmod +x "$tmp/curl"
 
