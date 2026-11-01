@@ -2,7 +2,7 @@ pub mod auth;
 pub mod channels;
 mod health;
 mod meta;
-pub mod streams;
+pub mod streams;\npub mod signaling;
 
 use crate::state::AppState;
 use axum::{
@@ -33,7 +33,7 @@ pub fn router() -> Router<AppState> {
             post(channels::follow).delete(channels::unfollow),
         )
         .route("/v1/channels/{slug}/streams", post(streams::create))
-        .route("/v1/streams", get(streams::discover))
+        .route("/v1/streams", get(streams::discover))\n        .route("/v1/media/ice-config", get(signaling::ice_config))\n        .route("/v1/streams/{stream_id}/signal", get(signaling::connect))
         .route(
             "/internal/v1/streams/{stream_id}/authorize-publish",
             post(streams::authorize_publish),
