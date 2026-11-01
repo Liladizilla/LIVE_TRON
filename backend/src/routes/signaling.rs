@@ -337,6 +337,13 @@ pub async fn connect(
             "signal_room_capacity_reached",
         ));
     }
+    // A newly connected peer must receive the existing room roster. Existing
+    // peers will receive this participant through the normal peer_joined event.
+    let existing_peers = room
+        .participants
+        .iter()
+        .map(|(id, is_publisher)| (*id, *is_publisher))
+        .collect::<Vec<_>>();
     let receiver = room.sender.subscribe();
     room.participants
         .insert(participant_id, role.is_publisher());
@@ -375,6 +382,7 @@ pub async fn connect(
                 role,
                 sender,
                 receiver,
+                existing_peers,
             )
         }))
 }
@@ -387,6 +395,7 @@ async fn handle_socket(
     role: PeerRole,
     room_sender: broadcast::Sender<String>,
     mut room_receiver: broadcast::Receiver<String>,
+    existing_peers: Vec<(Uuid, bool)>,
 ) {
     let (mut outgoing, mut incoming) = socket.split();
     let hello = json!({
@@ -405,13 +414,29 @@ async fn handle_socket(
         cleanup_participant(&state, stream_id, participant_id, role).await;
         return;
     }
+    // Send the existing roster directly to the new socket. Do not broadcast
+    // these messages: they are only relevant to the participant joining now,
+    // and a large roster must not overflow the bounded room broadcast channel.
+    for (peer_id, is_publisher) in existing_peers {
+        let peer_role = if is_publisher {
+            PeerRole::Publisher
+        } else {
+            PeerRole::Viewer
+        };
+        let event = peer_joined_event(peer_id, peer_role);
+        if outgoing
+            .send(Message::Text(event.to_string().into()))
+            .await
+            .is_err()
+        {
+            cleanup_participant(&state, stream_id, participant_id, role).await;
+            return;
+        }
+    }
+
     let mut signal_window = Instant::now();
     let mut signal_count = 0_u32;
-    let joined = json!({
-        "type": "peer_joined",
-        "from": participant_id,
-        "role": role.as_str()
-    });
+    let joined = peer_joined_event(participant_id, role);
     let _ = room_sender.send(joined.to_string());
 
     loop {
@@ -513,6 +538,14 @@ fn create_turn_credential(
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
 }
 
+fn peer_joined_event(participant_id: Uuid, role: PeerRole) -> Value {
+    json!({
+        "type": "peer_joined",
+        "from": participant_id,
+        "role": role.as_str()
+    })
+}
+
 fn valid_signal_ticket(ticket: &str) -> bool {
     ticket.len() == 64 && ticket.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -602,6 +635,20 @@ mod tests {
         assert!(valid_signal_ticket(&"a".repeat(64)));
         assert!(!valid_signal_ticket("short"));
         assert!(!valid_signal_ticket(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn peer_roster_events_identify_publisher_and_viewer_roles() {
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let publisher = super::peer_joined_event(publisher_id, PeerRole::Publisher);
+        let viewer = super::peer_joined_event(viewer_id, PeerRole::Viewer);
+
+        assert_eq!(publisher["type"], "peer_joined");
+        assert_eq!(publisher["from"], publisher_id.to_string());
+        assert_eq!(publisher["role"], "publisher");
+        assert_eq!(viewer["from"], viewer_id.to_string());
+        assert_eq!(viewer["role"], "viewer");
     }
 
     #[test]
