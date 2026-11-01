@@ -2,7 +2,7 @@ name: LIVE_TRON CI
 
 on:
   push:
-    branches: [main, develop, 'feat/**', 'test/**']
+    branches: [main, develop, 'feat/**', 'test/**', 'fix/**']
   pull_request:
     branches: [main, develop, 'feat/**', 'test/**']
 
