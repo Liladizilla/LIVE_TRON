@@ -23,8 +23,8 @@ pprof: false
 pathDefaults:
   # MediaMTX v1.21.3 uses runOnOnline/runOnOffline for source online transitions.
   # Mount live-tron-media-event.sh at this path and ensure curl is installed.
-  runOnOnline: /etc/mediamtx/live-tron-media-event.sh ingest_started $MTX_PATH
-  runOnOffline: /etc/mediamtx/live-tron-media-event.sh ingest_ended $MTX_PATH
+  runOnOnline: /bin/sh /etc/mediamtx/live-tron-media-event.sh ingest_started $MTX_PATH
+  runOnOffline: /bin/sh /etc/mediamtx/live-tron-media-event.sh ingest_ended $MTX_PATH
 paths:
   all_others:
     source: publisher
