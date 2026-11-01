@@ -1,11 +1,11 @@
 use super::auth::{authenticated_user, ApiError};
-use crate::state::{AppState, SignalRoom};
+use crate::state::{AppState, SignalRoom, SignalTicket};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
     },
-    http::{header::ORIGIN, HeaderMap, StatusCode},
+    http::{header::{ORIGIN, SEC_WEBSOCKET_PROTOCOL}, HeaderMap, StatusCode},
     response::Response,
     Json,
 };
@@ -15,6 +15,7 @@ use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use rand::{rngs::OsRng, RngCore};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -23,6 +24,8 @@ use uuid::Uuid;
 
 const MAX_SIGNAL_BYTES: usize = 16 * 1024;
 const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
+const SIGNAL_TICKET_TTL_SECONDS: u64 = 60;
+const SIGNAL_TICKET_PROTOCOL_PREFIX: &str = "live-tron.ticket.";
 type HmacSha1 = Hmac<Sha1>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,6 +157,41 @@ async fn stream_access(
     Ok(PeerRole::Viewer)
 }
 
+
+pub async fn create_ticket(
+    State(state): State<AppState>,
+    Path(stream_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<SignalTicketResponse>, ApiError> {
+    let db = state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))?;
+    let role = stream_access(db, stream_id, &headers, &state).await?;
+    let mut bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let ticket = hex::encode(bytes);
+    let ticket_hash = credential_hash(&ticket);
+    let mut tickets = state.signal_tickets.lock().await;
+    tickets.retain(|_, existing| existing.expires_at > Instant::now());
+    tickets.insert(
+        ticket_hash,
+        SignalTicket {
+            stream_id,
+            publisher: role.is_publisher(),
+            expires_at: Instant::now() + Duration::from_secs(SIGNAL_TICKET_TTL_SECONDS),
+        },
+    );
+    Ok(Json(SignalTicketResponse {
+        ticket: ticket.clone(),
+        expires_in: SIGNAL_TICKET_TTL_SECONDS,
+        websocket_protocols: [
+            "live-tron.signal.v1".to_owned(),
+            format!("{SIGNAL_TICKET_PROTOCOL_PREFIX}{ticket}"),
+        ],
+    }))
+}
+
 pub async fn connect(
     State(state): State<AppState>,
     Path(stream_id): Path<Uuid>,
@@ -168,11 +206,31 @@ pub async fn connect(
             ));
         }
     }
-    let db = state.db.as_ref().ok_or(ApiError(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "database_unavailable",
-    ))?;
-    let role = stream_access(db, stream_id, &headers, &state).await?;
+    let protocols = headers
+        .get(SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let ticket = protocols
+        .split(',')
+        .map(str::trim)
+        .find_map(|protocol| protocol.strip_prefix(SIGNAL_TICKET_PROTOCOL_PREFIX))
+        .filter(|value| valid_signal_ticket(value))
+        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "missing_or_invalid_signal_ticket"))?;
+    let ticket_hash = credential_hash(ticket);
+    let ticket_record = state
+        .signal_tickets
+        .lock()
+        .await
+        .remove(&ticket_hash)
+        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"))?;
+    if ticket_record.stream_id != stream_id || ticket_record.expires_at <= Instant::now() {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"));
+    }
+    let role = if ticket_record.publisher {
+        PeerRole::Publisher
+    } else {
+        PeerRole::Viewer
+    };
     let participant_id = Uuid::new_v4();
     let mut rooms = state.signal_rooms.lock().await;
     let room = rooms.entry(stream_id).or_insert_with(|| {
@@ -200,6 +258,7 @@ pub async fn connect(
 
     let state_for_socket = state.clone();
     Ok(ws
+        .protocols(["live-tron.signal.v1"])
         .max_message_size(MAX_SIGNAL_BYTES)
         .max_frame_size(MAX_SIGNAL_BYTES)
         .on_upgrade(move |socket| {
@@ -372,7 +431,8 @@ async fn cleanup_participant(
 #[cfg(test)]
 mod tests {
     use super::{
-        create_turn_credential, origin_is_allowed, valid_publish_key, valid_signal_kind, PeerRole,
+        create_turn_credential, origin_is_allowed, valid_publish_key, valid_signal_kind,
+        valid_signal_ticket, PeerRole,
     };
     use uuid::Uuid;
 
@@ -406,6 +466,13 @@ mod tests {
         let (_, other_user_credential) =
             create_turn_credential(Uuid::new_v4(), secret, 1_800_000_000).unwrap();
         assert_ne!(credential, other_user_credential);
+    }
+
+    #[test]
+    fn signaling_tickets_are_fixed_length_hex_capabilities() {
+        assert!(valid_signal_ticket(&"a".repeat(64)));
+        assert!(!valid_signal_ticket("short"));
+        assert!(!valid_signal_ticket(&"g".repeat(64)));
     }
 
     #[test]
