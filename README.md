@@ -97,6 +97,14 @@ JSON request bodies are capped at 64 KiB. Registration requires an ASCII email w
 
 OpenAPI contract: [backend/openapi.yaml](backend/openapi.yaml).
 
+### Browser WebRTC broadcasting
+
+The reusable `LiveBroadcastPanel` publishes camera and microphone media through MediaMTX WHIP. It requires a canonical stream UUID and the one-time publishing key returned by the authenticated stream-creation API. Pass the key to the component from the creator's in-memory session; never persist it in local storage, place it in a URL, log it, or expose it in public stream metadata. Configure `VITE_MEDIAMTX_WHEP_BASE_URL` with the public HTTPS MediaMTX origin and optionally configure `VITE_MEDIAMTX_STUN_URLS`. For TURN, pass the current ICE server list from the authenticated `GET /v1/media/ice-config` response through the component's `iceServers` prop.
+
+The publisher requests camera/microphone permission only after the creator presses Start. A pending startup can be cancelled; in-flight WHIP requests are aborted, and a device stream granted after cancellation is immediately stopped. The publisher gathers ICE candidates, sends an SDP offer to `/<stream-uuid>/whip` with the publishing key in an HTTP Bearer header, applies the SDP answer, and deletes the allocated WHIP session when stopped or unmounted. It rejects cross-origin session URLs to avoid forwarding the publishing credential to another host. MediaMTX and the browser must permit the required cross-origin WHIP requests, including authenticated DELETE. MediaMTX's bearer-token authentication and WHIP's bearer-token requirement are documented by the [MediaMTX authentication guide](https://mediamtx.org/docs/features/authentication) and [RFC 9725](https://www.rfc-editor.org/rfc/rfc9725/).
+
+This component is intentionally not wired to the preview-only Go Live button. The current app still needs authenticated account/session UI, a real stream-creation flow, secure in-memory publishing-key handoff, and a deployed MediaMTX endpoint before creators can use it end to end. A successful TypeScript build does not prove camera ingest, TURN reachability, lifecycle callbacks, or viewer playback.
+
 ### Browser WebRTC playback
 
 The watch page uses the WHEP player when the selected stream has a canonical UUID and `VITE_MEDIAMTX_WHEP_BASE_URL` is configured. Set that variable to the public HTTPS origin of MediaMTX (for example, `https://media.example.com`), and optionally set `VITE_MEDIAMTX_STUN_URLS` to a comma-separated STUN URL list. For authenticated TURN credentials, pass the ICE server list from the API to the player component. The player waits for ICE gathering, posts an SDP offer to `/<stream-uuid>/whep`, applies the SDP answer, and deletes the WHEP session when the player unmounts. It does not use the separate WebSocket signaling relay.
