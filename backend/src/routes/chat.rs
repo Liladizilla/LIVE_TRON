@@ -232,13 +232,25 @@ pub async fn connect(
         .map(str::trim)
         .find_map(|protocol| protocol.strip_prefix(CHAT_TICKET_PREFIX))
         .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or(ApiError(StatusCode::UNAUTHORIZED, "missing_or_invalid_chat_ticket"))?;
+        .ok_or(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "missing_or_invalid_chat_ticket",
+        ))?;
 
-    let record = state.chat_tickets.lock().await.remove(ticket).ok_or(ApiError(
-        StatusCode::UNAUTHORIZED, "chat_ticket_expired_or_used",
-    ))?;
+    let record = state
+        .chat_tickets
+        .lock()
+        .await
+        .remove(ticket)
+        .ok_or(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "chat_ticket_expired_or_used",
+        ))?;
     if record.stream_id != stream_id || record.expires_at <= Instant::now() {
-        return Err(ApiError(StatusCode::UNAUTHORIZED, "chat_ticket_expired_or_used"));
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "chat_ticket_expired_or_used",
+        ));
     }
     let db = pool(&state)?;
     let authorized = sqlx::query_scalar::<_, bool>(
@@ -263,7 +275,10 @@ pub async fn connect(
             sender
         });
         if sender.receiver_count() >= MAX_CHAT_CONNECTIONS_PER_STREAM {
-            return Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, "chat_room_capacity_reached"));
+            return Err(ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "chat_room_capacity_reached",
+            ));
         }
         (sender.clone(), sender.subscribe())
     };
