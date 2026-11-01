@@ -156,22 +156,6 @@ pub struct DiscoveryQuery {
     category: Option<String>,
     limit: Option<i64>,
 }
-pub async fn list_mine(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<ChannelView>>, ApiError> {
-    let owner = authenticated_user(&headers, &state)?;
-    let db = pool(&state)?;
-    let rows = sqlx::query_as::<_, ChannelView>(
-        "SELECT c.id, c.owner_user_id, c.slug, c.title, c.description, c.category, c.is_mature, count(f.follower_user_id)::bigint AS follower_count FROM channels c LEFT JOIN follows f ON f.channel_id = c.id WHERE c.owner_user_id = $1 GROUP BY c.id ORDER BY c.created_at DESC"
-    )
-    .bind(owner)
-    .fetch_all(db)
-    .await
-    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "channel_discovery_failed"))?;
-    Ok(Json(rows))
-}
-
 pub async fn discover(
     State(state): State<AppState>,
     Query(query): Query<DiscoveryQuery>,
@@ -269,23 +253,6 @@ pub async fn creator_profile(
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::valid_slug;
-
-    #[test]
-    fn channel_slugs_are_safe_and_url_friendly() {
-        assert!(valid_slug("live-tron"));
-        assert!(valid_slug("creator-2026"));
-        assert!(!valid_slug("ab"));
-        assert!(!valid_slug("-creator"));
-        assert!(!valid_slug("creator-"));
-        assert!(!valid_slug("creator--live"));
-        assert!(!valid_slug("Creator-Live"));
-        assert!(!valid_slug("creator/live"));
-    }
-}
-
 pub async fn my_channels(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -322,25 +289,4 @@ mod tests {
         assert!(!valid_slug("Creator-Live"));
         assert!(!valid_slug("creator/live"));
     }
-}
-
-pub async fn my_channels(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<ChannelView>>, ApiError> {
-    let owner = authenticated_user(&headers, &state)?;
-    let db = pool(&state)?;
-    let rows = sqlx::query_as::<_, ChannelView>(
-        "SELECT c.id, c.owner_user_id, c.slug, c.title, c.description, c.category, c.is_mature, (SELECT count(*) FROM follows f WHERE f.channel_id = c.id)::bigint AS follower_count FROM channels c WHERE c.owner_user_id = $1 ORDER BY c.created_at ASC"
-    )
-    .bind(owner)
-    .fetch_all(db)
-    .await
-    .map_err(|_| {
-        ApiError(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "channel_discovery_failed",
-        )
-    })?;
-    Ok(Json(rows))
 }
