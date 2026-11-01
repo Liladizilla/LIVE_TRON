@@ -39,6 +39,11 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
   const configuredBaseUrl = mediaServerUrl ?? import.meta.env.VITE_MEDIAMTX_WHEP_BASE_URL ?? ''
   const baseUrl = configuredBaseUrl.trim().replace(/\/+$/, '')
+  const stunList = import.meta.env.VITE_MEDIAMTX_STUN_URLS || ''
+  const resolvedIceServers = useMemo(
+    () => iceServers || stunList.split(',').map((url) => url.trim()).filter(Boolean).map((url) => ({ urls: url })),
+    [iceServers, stunList],
+  )
 
   useEffect(() => {
     let disposed = false
