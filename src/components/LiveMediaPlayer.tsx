@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchIceConfig, fetchMediaReadToken } from '../lib/api'
 
 type PlayerStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -11,23 +12,32 @@ type LiveMediaPlayerProps = {
 const STREAM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const ICE_GATHERING_TIMEOUT_MS = 15_000
 
-function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
+function waitForIceGatheringComplete(peer: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException('Playback connection was cancelled.', 'AbortError'))
   if (peer.iceGatheringState === 'complete') return Promise.resolve()
 
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      peer.removeEventListener('icegatheringstatechange', onStateChange)
-      reject(new Error('ICE gathering timed out. Check the media server and network configuration.'))
-    }, ICE_GATHERING_TIMEOUT_MS)
-
-    const onStateChange = () => {
-      if (peer.iceGatheringState !== 'complete') return
+    const cleanup = () => {
       window.clearTimeout(timeout)
       peer.removeEventListener('icegatheringstatechange', onStateChange)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const timeout = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('ICE gathering timed out. Check the media server and network configuration.'))
+    }, ICE_GATHERING_TIMEOUT_MS)
+    const onStateChange = () => {
+      if (peer.iceGatheringState !== 'complete') return
+      cleanup()
       resolve()
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(new DOMException('Playback connection was cancelled.', 'AbortError'))
     }
 
     peer.addEventListener('icegatheringstatechange', onStateChange)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -48,6 +58,8 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
   useEffect(() => {
     let disposed = false
     let sessionUrl: string | null = null
+    let sessionAuthorization: string | null = null
+    const requestController = new AbortController()
     const peer = new RTCPeerConnection({ iceServers: resolvedIceServers })
     const receivedStream = new MediaStream()
 
@@ -55,7 +67,13 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
       if (!sessionUrl) return
       const resource = sessionUrl
       sessionUrl = null
-      void fetch(resource, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+      const authorization = sessionAuthorization
+      sessionAuthorization = null
+      void fetch(resource, {
+        method: 'DELETE',
+        headers: authorization ? { Authorization: `Bearer ${authorization}` } : {},
+        keepalive: true,
+      }).catch(() => undefined)
     }
 
     const fail = (message: string) => {
@@ -116,9 +134,26 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
           throw new Error('The MediaMTX base URL must be a clean origin without credentials or query parameters.')
         }
         const endpoint = `${mediaOrigin.origin}/${encodeURIComponent(streamId)}/whep`
+        let mediaToken: string | null = null
+        try {
+          const authenticatedIceServers = await fetchIceConfig(requestController.signal)
+          if (!disposed) peer.setConfiguration({ iceServers: authenticatedIceServers })
+        } catch (iceError) {
+          if (requestController.signal.aborted) throw iceError
+          // Anonymous viewers can still attempt direct ICE with the configured STUN fallback.
+        }
+        try {
+          const grant = await fetchMediaReadToken(streamId, requestController.signal)
+          mediaToken = grant.token
+          sessionAuthorization = grant.token
+        } catch (tokenError) {
+          if (requestController.signal.aborted) throw tokenError
+          // Public and unlisted streams remain readable without an authenticated token.
+        }
+        if (disposed) return
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
-        await waitForIceGatheringComplete(peer)
+        await waitForIceGatheringComplete(peer, requestController.signal)
 
         if (disposed) return
         const localSdp = peer.localDescription?.sdp
@@ -129,11 +164,13 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
           headers: {
             Accept: 'application/sdp',
             'Content-Type': 'application/sdp',
+            ...(mediaToken ? { Authorization: `Bearer ${mediaToken}` } : {}),
           },
           body: localSdp,
+          signal: requestController.signal,
         })
 
-        if (!response.ok) {
+        if (response.status !== 201 && response.status !== 200) {
           if (response.status === 409) {
             throw new Error('This stream is not online yet. Try again when the creator is broadcasting.')
           }
@@ -145,8 +182,16 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
         const location = response.headers.get('Location')
         if (!location) throw new Error('Media server did not return a WHEP session location.')
-        sessionUrl = new URL(location, endpoint).toString()
+        const session = new URL(location, endpoint)
+        if (session.origin !== mediaOrigin.origin || session.username || session.password) {
+          throw new Error('Media server returned an unsafe cross-origin WHEP session URL; refusing to manage that session.')
+        }
+        sessionUrl = session.toString()
 
+        const contentType = response.headers.get('Content-Type') ?? ''
+        if (!contentType.toLowerCase().includes('application/sdp')) {
+          throw new Error('Media server returned an unexpected WHEP response type instead of SDP.')
+        }
         const answer = await response.text()
         if (disposed) {
           removeSession()
@@ -166,6 +211,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
     return () => {
       disposed = true
+      requestController.abort()
       peer.removeEventListener('track', attachTrack)
       peer.close()
       const video = videoRef.current

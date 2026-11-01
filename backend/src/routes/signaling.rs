@@ -22,7 +22,10 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -231,13 +234,11 @@ pub async fn connect(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    if let Some(origin) = headers.get(ORIGIN).and_then(|value| value.to_str().ok()) {
-        if !origin_is_allowed(origin, &state.allowed_origins) {
-            return Err(ApiError(
-                StatusCode::FORBIDDEN,
-                "websocket_origin_not_allowed",
-            ));
-        }
+    if !request_origin_is_allowed(&headers, &state.allowed_origins) {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "websocket_origin_not_allowed",
+        ));
     }
     let protocols = headers
         .get(SEC_WEBSOCKET_PROTOCOL)
@@ -349,6 +350,9 @@ pub async fn connect(
             "signal_room_capacity_reached",
         ));
     }
+    // A newly connected peer must receive the existing room roster. Existing
+    // peers will receive this participant through the normal peer_joined event.
+    let existing_peers = peer_roster(&room.participants, role);
     let receiver = room.sender.subscribe();
     room.participants
         .insert(participant_id, role.is_publisher());
@@ -359,32 +363,56 @@ pub async fn connect(
     drop(rooms);
 
     let state_for_socket = state.clone();
+    let state_for_failed_upgrade = state.clone();
     Ok(ws
         .protocols(["live-tron.signal.v1"])
         .max_message_size(MAX_SIGNAL_BYTES)
         .max_frame_size(MAX_SIGNAL_BYTES)
+        .on_failed_upgrade(move |_| {
+            // The participant is reserved before the HTTP upgrade response is sent.
+            // If the handshake fails, release that reservation so a publisher slot
+            // cannot remain stuck until the process restarts.
+            tokio::spawn(async move {
+                cleanup_participant(&state_for_failed_upgrade, stream_id, participant_id, role)
+                    .await;
+            });
+        })
         .on_upgrade(move |socket| {
             handle_socket(
                 socket,
-                state_for_socket,
-                stream_id,
-                participant_id,
-                role,
-                sender,
-                receiver,
+                SocketContext {
+                    state: state_for_socket,
+                    stream_id,
+                    participant_id,
+                    role,
+                    room_sender: sender,
+                    room_receiver: receiver,
+                    existing_peers,
+                },
             )
         }))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
+struct SocketContext {
     state: AppState,
     stream_id: Uuid,
     participant_id: Uuid,
     role: PeerRole,
     room_sender: broadcast::Sender<String>,
-    mut room_receiver: broadcast::Receiver<String>,
-) {
+    room_receiver: broadcast::Receiver<String>,
+    existing_peers: Vec<(Uuid, bool)>,
+}
+
+async fn handle_socket(socket: WebSocket, context: SocketContext) {
+    let SocketContext {
+        state,
+        stream_id,
+        participant_id,
+        role,
+        room_sender,
+        mut room_receiver,
+        existing_peers,
+    } = context;
     let (mut outgoing, mut incoming) = socket.split();
     let hello = json!({
         "type": "ready",
@@ -402,13 +430,29 @@ async fn handle_socket(
         cleanup_participant(&state, stream_id, participant_id, role).await;
         return;
     }
+    // Send the existing roster directly to the new socket. Do not broadcast
+    // these messages: they are only relevant to the participant joining now,
+    // and a large roster must not overflow the bounded room broadcast channel.
+    for (peer_id, is_publisher) in existing_peers {
+        let peer_role = if is_publisher {
+            PeerRole::Publisher
+        } else {
+            PeerRole::Viewer
+        };
+        let event = peer_joined_event(peer_id, peer_role);
+        if outgoing
+            .send(Message::Text(event.to_string().into()))
+            .await
+            .is_err()
+        {
+            cleanup_participant(&state, stream_id, participant_id, role).await;
+            return;
+        }
+    }
+
     let mut signal_window = Instant::now();
     let mut signal_count = 0_u32;
-    let joined = json!({
-        "type": "peer_joined",
-        "from": participant_id,
-        "role": role.as_str()
-    });
+    let joined = peer_joined_event(participant_id, role);
     let _ = room_sender.send(joined.to_string());
 
     loop {
@@ -510,12 +554,38 @@ fn create_turn_credential(
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
 }
 
+fn peer_roster(participants: &HashMap<Uuid, bool>, joining_role: PeerRole) -> Vec<(Uuid, bool)> {
+    participants
+        .iter()
+        .filter_map(|(id, is_publisher)| {
+            (*is_publisher != joining_role.is_publisher()).then_some((*id, *is_publisher))
+        })
+        .collect()
+}
+
+fn peer_joined_event(participant_id: Uuid, role: PeerRole) -> Value {
+    json!({
+        "type": "peer_joined",
+        "from": participant_id,
+        "role": role.as_str()
+    })
+}
+
 fn valid_signal_ticket(ticket: &str) -> bool {
     ticket.len() == 64 && ticket.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn origin_is_allowed(origin: &str, allowed_origins: &[String]) -> bool {
     allowed_origins.iter().any(|allowed| allowed == origin)
+}
+
+// Browser WebSocket requests must carry an Origin header. Treat a missing,
+// malformed, or unlisted origin as a denial instead of silently allowing it.
+fn request_origin_is_allowed(headers: &HeaderMap, allowed_origins: &[String]) -> bool {
+    headers
+        .get(ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|origin| origin_is_allowed(origin, allowed_origins))
 }
 
 fn valid_signal_kind(kind: &str, role: PeerRole) -> bool {
@@ -593,6 +663,42 @@ mod tests {
     }
 
     #[test]
+    fn peer_roster_events_identify_publisher_and_viewer_roles() {
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let publisher = super::peer_joined_event(publisher_id, PeerRole::Publisher);
+        let viewer = super::peer_joined_event(viewer_id, PeerRole::Viewer);
+
+        assert_eq!(publisher["type"], "peer_joined");
+        assert_eq!(publisher["from"], publisher_id.to_string());
+        assert_eq!(publisher["role"], "publisher");
+        assert_eq!(viewer["from"], viewer_id.to_string());
+        assert_eq!(viewer["role"], "viewer");
+    }
+
+    #[test]
+    fn peer_roster_only_includes_the_opposite_signaling_role() {
+        use std::collections::HashMap;
+
+        let publisher_id = Uuid::new_v4();
+        let viewer_one_id = Uuid::new_v4();
+        let viewer_two_id = Uuid::new_v4();
+        let mut participants = HashMap::new();
+        participants.insert(publisher_id, true);
+        participants.insert(viewer_one_id, false);
+        participants.insert(viewer_two_id, false);
+
+        let publisher_roster = super::peer_roster(&participants, PeerRole::Publisher);
+        let viewer_roster = super::peer_roster(&participants, PeerRole::Viewer);
+
+        assert_eq!(publisher_roster.len(), 2);
+        assert!(publisher_roster
+            .iter()
+            .all(|(_, is_publisher)| !*is_publisher));
+        assert_eq!(viewer_roster, vec![(publisher_id, true)]);
+    }
+
+    #[test]
     fn websocket_origins_must_match_an_exact_allowlist_entry() {
         let allowed = vec!["https://live.example".to_owned()];
         assert!(origin_is_allowed("https://live.example", &allowed));
@@ -602,5 +708,149 @@ mod tests {
             &allowed
         ));
         assert!(!origin_is_allowed("https://live.example", &[]));
+    }
+
+    #[test]
+    fn websocket_requests_without_origin_are_rejected() {
+        use axum::http::HeaderMap;
+        let headers = HeaderMap::new();
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_invalid_origin_encoding_are_rejected() {
+        use axum::http::{header::ORIGIN, HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, HeaderValue::from_bytes(&[0xff]).unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_unlisted_origin_are_rejected() {
+        use axum::http::{header::ORIGIN, HeaderMap};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, "https://attacker.example".parse().unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(!super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[test]
+    fn websocket_requests_with_allowlisted_origin_are_accepted() {
+        use axum::http::{header::ORIGIN, HeaderMap};
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, "https://live.example".parse().unwrap());
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[tokio::test]
+    async fn failed_upgrade_cleanup_releases_publisher_reservation() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let participant_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(participant_id, true);
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(participant_id),
+                    participants,
+                },
+            );
+        }
+
+        super::cleanup_participant(
+            &state,
+            stream_id,
+            participant_id,
+            super::PeerRole::Publisher,
+        )
+        .await;
+
+        let rooms = state.signal_rooms.lock().await;
+        assert!(!rooms.contains_key(&stream_id));
+    }
+
+    #[tokio::test]
+    async fn viewer_cleanup_preserves_active_publisher() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(publisher_id, true);
+            participants.insert(viewer_id, false);
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(publisher_id),
+                    participants,
+                },
+            );
+        }
+
+        super::cleanup_participant(&state, stream_id, viewer_id, super::PeerRole::Viewer).await;
+
+        let rooms = state.signal_rooms.lock().await;
+        let room = rooms.get(&stream_id).expect("publisher room must remain");
+        assert_eq!(room.publisher, Some(publisher_id));
+        assert!(room.participants.contains_key(&publisher_id));
+        assert!(!room.participants.contains_key(&viewer_id));
+    }
+
+    #[tokio::test]
+    async fn publisher_cleanup_does_not_remove_other_viewers() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(publisher_id, true);
+            participants.insert(viewer_id, false);
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(publisher_id),
+                    participants,
+                },
+            );
+        }
+
+        super::cleanup_participant(&state, stream_id, publisher_id, super::PeerRole::Publisher)
+            .await;
+
+        let rooms = state.signal_rooms.lock().await;
+        let room = rooms.get(&stream_id).expect("viewer room must remain");
+        assert_eq!(room.publisher, None);
+        assert!(room.participants.contains_key(&viewer_id));
     }
 }

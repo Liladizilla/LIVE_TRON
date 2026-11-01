@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { fetchIceConfig } from '../lib/api'
 import './LiveBroadcastPanel.css'
 
 type BroadcastStatus = 'idle' | 'requesting' | 'connecting' | 'live' | 'stopping' | 'error'
@@ -136,6 +137,17 @@ export default function LiveBroadcastPanel({
       controller = new AbortController()
       requestRef.current = controller
       setStatus('requesting')
+      let activeIceServers = iceServers ?? configuredIceServers
+      if (!iceServers) {
+        try {
+          activeIceServers = await fetchIceConfig(controller.signal)
+        } catch (iceError) {
+          if (controller.signal.aborted) throw iceError
+          // The configured public STUN fallback keeps local and permissive networks usable.
+          // Authenticated TURN is preferred whenever the API can issue short-lived credentials.
+        }
+      }
+      if (controller.signal.aborted) return
       const localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
@@ -147,7 +159,7 @@ export default function LiveBroadcastPanel({
       streamRef.current = localStream
       if (previewRef.current) previewRef.current.srcObject = localStream
 
-      const peer = new RTCPeerConnection({ iceServers: configuredIceServers })
+      const peer = new RTCPeerConnection({ iceServers: activeIceServers })
       peerRef.current = peer
       localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
       peer.addEventListener('connectionstatechange', () => {

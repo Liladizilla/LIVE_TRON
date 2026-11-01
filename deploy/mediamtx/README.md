@@ -29,6 +29,14 @@ Set these environment variables in the MediaMTX container:
 
 Also set `LIVE_TRON_MEDIAMTX_AUTH_SECRET` on the API and provide the same value in `authHTTPAddress` as shown in `mediamtx.yml`. Never commit real secrets. Do not expose either internal callback to public ingress.
 
+## Viewer authorization
+
+- Public and unlisted live streams can be read without a MediaMTX token. Unlisted streams remain absent from public discovery.
+- Private live streams require an authenticated viewer to obtain a five-minute signed media-read token from `GET /v1/streams/{stream_id}/media-token`.
+- The browser sends that token as `Authorization: Bearer` on the WHEP request. MediaMTX forwards it as the HTTP-auth `token` field, and the API verifies its HMAC, stream binding, expiry, live status, and private-stream owner access.
+- The signing key is the same high-entropy `LIVE_TRON_MEDIAMTX_AUTH_SECRET` shared with the MediaMTX auth callback. Rotating it invalidates both callback access and outstanding read tokens.
+- Private-stream sharing with invited non-owner viewers is not implemented yet; current private playback is owner-only.
+
 ## Failure behavior
 
 The hook command exits non-zero if the API remains unavailable after retries. MediaMTX logs the command failure, but the stream itself is not forcibly disconnected by this callback. Alert on failed lifecycle delivery and reconcile stream status against MediaMTX's actual online state. The API event endpoint is idempotent for repeated event IDs and rejects invalid lifecycle transitions.
