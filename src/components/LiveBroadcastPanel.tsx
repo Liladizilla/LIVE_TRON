@@ -74,7 +74,7 @@ export default function LiveBroadcastPanel({
   const [cameraEnabled, setCameraEnabled] = useState(true)
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true)
 
-  const baseUrl = mediaServerUrl ?? import.meta.env.VITE_MEDIAMTX_WHEP_BASE_URL ?? ''
+  const baseUrl = mediaServerUrl ?? import.meta.env.VITE_MEDIAMTX_WHIP_BASE_URL ?? ''
   const stunList = String(import.meta.env.VITE_MEDIAMTX_STUN_URLS || '')
   const configuredIceServers = iceServers ?? stunList.split(',').map((url) => url.trim()).filter(Boolean).map((url) => ({ urls: url }))
 
