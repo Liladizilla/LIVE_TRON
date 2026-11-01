@@ -102,7 +102,15 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
       setError('')
 
       try {
-        const endpoint = `${baseUrl}/${encodeURIComponent(streamId)}/whep`
+        const mediaOrigin = new URL(baseUrl)
+        const localDevelopmentHost = ['localhost', '127.0.0.1', '[::1]'].includes(mediaOrigin.hostname)
+        if (mediaOrigin.protocol !== 'https:' && !(mediaOrigin.protocol === 'http:' && localDevelopmentHost)) {
+          throw new Error('Media playback requires HTTPS outside localhost development.')
+        }
+        if (mediaOrigin.username || mediaOrigin.password || mediaOrigin.search || mediaOrigin.hash) {
+          throw new Error('The MediaMTX base URL must be a clean origin without credentials or query parameters.')
+        }
+        const endpoint = `${mediaOrigin.origin}/${encodeURIComponent(streamId)}/whep`
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
         await waitForIceGatheringComplete(peer)
