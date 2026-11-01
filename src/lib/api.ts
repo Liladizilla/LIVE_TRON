@@ -173,6 +173,18 @@ export type IceConfigResponse = {
   expires_in: number
 }
 
+export type MediaReadTokenResponse = {
+  token: string
+  expires_in: number
+}
+
+export async function fetchMediaReadToken(streamId: string, signal?: AbortSignal): Promise<MediaReadTokenResponse> {
+  return authenticatedRequest<MediaReadTokenResponse>(
+    `/v1/streams/${encodeURIComponent(streamId)}/media-token`,
+    { signal },
+  )
+}
+
 export async function fetchIceConfig(signal?: AbortSignal): Promise<RTCIceServer[]> {
   const response = await authenticatedRequest<IceConfigResponse>('/v1/media/ice-config', { signal })
   if (!Array.isArray(response.ice_servers) || response.ice_servers.length === 0) {
