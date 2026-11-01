@@ -18,7 +18,6 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -83,12 +82,7 @@ pub async fn ice_config(
         state.ice.turn_shared_secret.as_deref(),
         state.ice.turn_urls.is_empty(),
     ) {
-        let expires_at = Utc::now().timestamp() + TURN_CREDENTIAL_TTL_SECONDS;
-        let username = format!("{expires_at}:{user_id}");
-        let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
-            .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "turn_credentials_failed"))?;
-        mac.update(username.as_bytes());
-        let credential = STANDARD.encode(mac.finalize().into_bytes());
+        let (username, credential) = create_turn_credential(user_id, secret, Utc::now().timestamp())?;
         ice_servers.push(IceServer {
             urls: state.ice.turn_urls.clone(),
             username: Some(username),
@@ -166,7 +160,7 @@ pub async fn connect(
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     if let Some(origin) = headers.get(ORIGIN).and_then(|value| value.to_str().ok()) {
-        if !state.allowed_origins.iter().any(|allowed| allowed == origin) {
+        if !origin_is_allowed(origin, &state.allowed_origins) {
             return Err(ApiError(StatusCode::FORBIDDEN, "websocket_origin_not_allowed"));
         }
     }
@@ -291,15 +285,16 @@ async fn handle_socket(
             outbound = room_receiver.recv() => {
                 match outbound {
                     Ok(payload) => {
-                        let should_deliver = serde_json::from_str::<Value>(&payload)
-                            .ok()
-                            .and_then(|value| value.get("to").and_then(Value::as_str).map(str::to_owned))
-                            .is_some_and(|target| target == participant_id.to_string());
-                        let is_own_join = serde_json::from_str::<Value>(&payload)
-                            .ok()
-                            .and_then(|value| value.get("from").and_then(Value::as_str).map(str::to_owned))
-                            .is_some_and(|sender| sender == participant_id.to_string());
-                        if should_deliver && !is_own_join
+                        let event = serde_json::from_str::<Value>(&payload).ok();
+                        let should_deliver = event.as_ref().is_some_and(|value| {
+                            value.get("to").and_then(Value::as_str)
+                                .is_some_and(|target| target == participant_id.to_string())
+                                || (value.get("to").is_none()
+                                    && matches!(value.get("type").and_then(Value::as_str), Some("peer_joined" | "peer_left"))
+                                    && value.get("from").and_then(Value::as_str)
+                                        .is_some_and(|sender| sender != participant_id.to_string()))
+                        });
+                        if should_deliver
                             && outgoing.send(Message::Text(payload.into())).await.is_err() {
                             break;
                         }
@@ -317,6 +312,23 @@ async fn handle_socket(
     });
     let _ = room_sender.send(left.to_string());
     cleanup_participant(&state, stream_id, participant_id, role).await;
+}
+
+fn create_turn_credential(
+    user_id: Uuid,
+    secret: &str,
+    now: i64,
+) -> Result<(String, String), ApiError> {
+    let expires_at = now + TURN_CREDENTIAL_TTL_SECONDS;
+    let username = format!("{expires_at}:{user_id}");
+    let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "turn_credentials_failed"))?;
+    mac.update(username.as_bytes());
+    Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
+}
+
+fn origin_is_allowed(origin: &str, allowed_origins: &[String]) -> bool {
+    allowed_origins.iter().any(|allowed| allowed == origin)
 }
 
 fn valid_signal_kind(kind: &str, role: PeerRole) -> bool {
@@ -348,7 +360,8 @@ async fn cleanup_participant(
 
 #[cfg(test)]
 mod tests {
-    use super::{valid_publish_key, valid_signal_kind, PeerRole};
+    use super::{create_turn_credential, origin_is_allowed, valid_publish_key, valid_signal_kind, PeerRole};
+    use uuid::Uuid;
 
     #[test]
     fn signaling_roles_cannot_invert_offer_answer_flow() {
@@ -366,5 +379,27 @@ mod tests {
         assert!(valid_publish_key(&format!("lt_pub_{}", "a".repeat(64))));
         assert!(!valid_publish_key("lt_pub_short"));
         assert!(!valid_publish_key(&format!("lt_pub_{}", "g".repeat(64))));
+    }
+
+    #[test]
+    fn turn_credentials_are_ephemeral_and_bound_to_user_identity() {
+        let user_id = Uuid::new_v4();
+        let secret = "a-long-turn-rest-shared-secret-for-tests";
+        let (username, credential) = create_turn_credential(user_id, secret, 1_800_000_000).unwrap();
+        assert_eq!(username, format!("1800003600:{user_id}"));
+        assert!(!credential.is_empty());
+        assert_ne!(credential, secret);
+        let (_, other_user_credential) =
+            create_turn_credential(Uuid::new_v4(), secret, 1_800_000_000).unwrap();
+        assert_ne!(credential, other_user_credential);
+    }
+
+    #[test]
+    fn websocket_origins_must_match_an_exact_allowlist_entry() {
+        let allowed = vec!["https://live.example".to_owned()];
+        assert!(origin_is_allowed("https://live.example", &allowed));
+        assert!(!origin_is_allowed("https://evil.example", &allowed));
+        assert!(!origin_is_allowed("https://live.example.evil.test", &allowed));
+        assert!(!origin_is_allowed("https://live.example", &[]));
     }
 }
