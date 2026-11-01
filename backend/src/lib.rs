@@ -37,7 +37,19 @@ pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
         .with_state(state)
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |request: &axum::http::Request<_>| {
+                    // Query strings can contain the MediaMTX callback secret. Never
+                    // include them in request spans or structured logs.
+                    tracing::info_span!(
+                        "http_request",
+                        method = %request.method(),
+                        path = %request.uri().path()
+                    )
+                },
+            ),
+        )
 }
 
 #[cfg(test)]
