@@ -397,7 +397,6 @@ pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
     }
 }
 
-
 #[cfg(test)]
 mod websocket_origin_tests {
     use super::*;
@@ -412,7 +411,10 @@ mod websocket_origin_tests {
         headers.insert(ORIGIN, HeaderValue::from_static("not-an-origin"));
         assert!(!chat_origin_allowed(&headers, &allowed));
 
-        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example.test"));
+        headers.insert(
+            ORIGIN,
+            HeaderValue::from_static("https://evil.example.test"),
+        );
         assert!(!chat_origin_allowed(&headers, &allowed));
 
         headers.insert(
