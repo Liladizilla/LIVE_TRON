@@ -39,6 +39,10 @@ npm run dev
 
 Open the URL printed by Vite (normally http://localhost:5173).
 
+To use real API-backed discovery, copy the root `.env.example` to `.env.local` and set `VITE_LIVE_TRON_API_URL` to the browser-reachable API origin. Add that web origin to the API's `LIVE_TRON_CORS_ORIGINS`. When configured, discovery reads only public, live, non-mature streams from `GET /v1/streams`; an empty API result stays empty instead of silently substituting demo broadcasts. The API does not currently expose viewer counts or creator artwork, so counts are shown as unavailable and category artwork is used until those fields exist.
+
+The browser API client keeps access and refresh tokens in memory only. Reloading the page signs the browser out. Persistent sessions should use a same-origin backend-for-frontend with Secure, HttpOnly, SameSite cookies before production deployment.
+
 ## Run the API
 
 Requirements: Rust stable and PostgreSQL 16+.
