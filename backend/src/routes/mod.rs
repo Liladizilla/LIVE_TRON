@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod channels;
 mod health;
+mod media_auth;
 mod meta;
 pub mod signaling;
 pub mod streams;
@@ -16,6 +17,10 @@ pub fn router() -> Router<AppState> {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/v1", get(meta::api_info))
+        .route(
+            "/internal/v1/media/authorize",
+            post(media_auth::authorize_media),
+        )
         .route("/v1/auth/register", post(auth::register))
         .route("/v1/auth/login", post(auth::login))
         .route("/v1/auth/refresh", post(auth::refresh))

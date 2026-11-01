@@ -204,6 +204,26 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
       responses:
         "200": { description: Live public non-mature streams }
+  /internal/v1/media/authorize:
+    post:
+      summary: Private MediaMTX HTTP authentication callback
+      description: Must be reachable only over a private network shared with MediaMTX. Allows publishing with an active one-time publishing key and reading only public, non-mature streams already marked live.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, path]
+              properties:
+                action: { type: string, enum: [publish, read] }
+                path: { type: string, format: uuid }
+                token: { type: string, description: Publishing key for publish; ignored for public read authorization }
+                protocol: { type: string }
+      responses:
+        "200": { description: Media action authorized }
+        "401": { description: Invalid key, stream path, state, or visibility }
+        "503": { description: Database unavailable }
   /v1/media/ice-config:
     get:
       security: [{ bearerAuth: [] }]

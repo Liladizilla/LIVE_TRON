@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
         AppState::new(db)
             .with_jwt_secret(settings.jwt_secret)
             .with_media_event_secret(settings.media_event_secret)
+            .with_mediamtx_auth_secret(settings.mediamtx_auth_secret)
             .with_ice_settings(
                 settings.stun_urls,
                 settings.turn_urls,

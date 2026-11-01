@@ -10,6 +10,7 @@ pub struct Settings {
     pub database_max_connections: u32,
     pub jwt_secret: Option<String>,
     pub media_event_secret: Option<String>,
+    pub mediamtx_auth_secret: Option<String>,
     pub stun_urls: Vec<String>,
     pub turn_urls: Vec<String>,
     pub turn_shared_secret: Option<String>,
@@ -60,6 +61,15 @@ impl Settings {
                 "LIVE_TRON_MEDIA_EVENT_SECRET must contain at least 32 bytes"
             );
         }
+        let mediamtx_auth_secret = std::env::var("LIVE_TRON_MEDIAMTX_AUTH_SECRET")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        if let Some(secret) = &mediamtx_auth_secret {
+            anyhow::ensure!(
+                secret.len() >= 32,
+                "LIVE_TRON_MEDIAMTX_AUTH_SECRET must contain at least 32 bytes"
+            );
+        }
         let stun_urls = csv_env("LIVE_TRON_STUN_URLS", "stun:stun.l.google.com:19302");
         anyhow::ensure!(
             stun_urls
@@ -105,6 +115,7 @@ impl Settings {
             database_max_connections,
             jwt_secret,
             media_event_secret,
+            mediamtx_auth_secret,
             stun_urls,
             turn_urls,
             turn_shared_secret,

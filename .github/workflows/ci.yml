@@ -25,6 +25,19 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+  media-config:
+    name: MediaMTX configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Validate pinned MediaMTX configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/mediamtx:/etc/mediamtx:ro" \
+            bluenviron/mediamtx:1.21.3 \
+            --validate-conf=/etc/mediamtx/mediamtx.yml
+
   api:
     name: Rust API and database
     runs-on: ubuntu-latest

@@ -37,7 +37,19 @@ pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
         .with_state(state)
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(cors)
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                |request: &axum::http::Request<_>| {
+                    // Query strings can contain the MediaMTX callback secret. Never
+                    // include them in request spans or structured logs.
+                    tracing::info_span!(
+                        "http_request",
+                        method = %request.method(),
+                        path = %request.uri().path()
+                    )
+                },
+            ),
+        )
 }
 
 #[cfg(test)]
@@ -105,6 +117,50 @@ mod tests {
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["media_plane"], "not_connected");
+    }
+
+    #[tokio::test]
+    async fn mediamtx_auth_callback_fails_closed_without_configured_secret() {
+        let app = build_app(AppState::default(), &[]);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/v1/media/authorize?secret=anything")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action":"publish","path":"00000000-0000-4000-8000-000000000001","token":"lt_pub_invalid"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn mediamtx_auth_callback_rejects_a_wrong_shared_secret() {
+        let app = build_app(
+            AppState::default()
+                .with_mediamtx_auth_secret(Some("correct-secret-value-32-bytes-long".to_owned())),
+            &[],
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/v1/media/authorize?secret=wrong-secret-value")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action":"publish","path":"00000000-0000-4000-8000-000000000001","token":"lt_pub_invalid"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

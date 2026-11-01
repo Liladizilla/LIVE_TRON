@@ -1,0 +1,27 @@
+# MediaMTX v1.21.3 baseline for LIVE_TRON WebRTC ingest/playback.
+# Keep the API auth callback on a private Docker/VPC network.
+logLevel: info
+logDestinations: [stdout]
+authMethod: http
+authHTTPAddress: http://live-tron-api:8080/internal/v1/media/authorize
+authHTTPExclude: []
+rtsp: false
+rtmp: false
+hls: false
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: false
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+# Set MTX_WEBRTCADDITIONALHOSTS to the public DNS name or IP of this host.
+# Do not advertise a container/private address to internet clients.
+webrtcAdditionalHosts: []
+# Do not enable the Control API, metrics, or pprof on a public interface.
+api: false
+metrics: false
+pprof: false
+paths:
+  all_others:
+    source: publisher
+    overridePublisher: false
+    record: false
