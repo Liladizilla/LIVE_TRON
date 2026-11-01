@@ -46,6 +46,10 @@ pub fn router() -> Router<AppState> {
         .route("/v1/streams", get(streams::discover))
         .route("/v1/media/ice-config", get(signaling::ice_config))
         .route(
+            "/v1/streams/{stream_id}/media-token",
+            get(media_auth::create_media_read_token),
+        )
+        .route(
             "/v1/streams/{stream_id}/signal-ticket",
             post(signaling::create_ticket),
         )
