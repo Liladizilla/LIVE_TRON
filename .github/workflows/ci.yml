@@ -37,6 +37,10 @@ jobs:
             -v "$PWD/deploy/mediamtx:/etc/mediamtx:ro" \
             bluenviron/mediamtx:1.21.3 \
             --validate-conf=/etc/mediamtx/mediamtx.yml
+      - name: Validate MediaMTX lifecycle hook shell syntax
+        run: sh -n deploy/mediamtx/live-tron-media-event.sh
+      - name: Test MediaMTX lifecycle hook payloads
+        run: sh deploy/mediamtx/test-media-event-hook.sh
 
   api:
     name: Rust API and database

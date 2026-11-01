@@ -37,6 +37,11 @@ async fn main() -> anyhow::Result<()> {
             "LIVE_TRON_MEDIA_EVENT_SECRET is missing; internal media events will fail closed"
         );
     }
+    if settings.mediamtx_auth_secret.is_none() {
+        tracing::warn!(
+            "LIVE_TRON_MEDIAMTX_AUTH_SECRET is missing; MediaMTX authentication will fail closed"
+        );
+    }
     let app = build_app(
         AppState::new(db)
             .with_jwt_secret(settings.jwt_secret)

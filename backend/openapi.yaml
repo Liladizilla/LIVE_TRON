@@ -204,6 +204,26 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
       responses:
         "200": { description: Live public non-mature streams }
+  /internal/v1/media/events:
+    post:
+      summary: Trusted MediaMTX online/offline lifecycle callback
+      description: Private media-network endpoint authenticated by X-Live-Tron-Media-Secret. Event IDs are idempotent; only created-to-live and live-to-ended transitions are accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, stream_id, event_type]
+              properties:
+                event_id: { type: string, format: uuid }
+                stream_id: { type: string, format: uuid }
+                event_type: { type: string, enum: [ingest_started, ingest_ended] }
+      responses:
+        "204": { description: Event applied or duplicate event already applied }
+        "401": { description: Missing or invalid media event secret }
+        "409": { description: Event ID reused or invalid lifecycle transition }
+        "503": { description: Media event secret or database unavailable }
   /internal/v1/media/authorize:
     post:
       summary: Private MediaMTX HTTP authentication callback
