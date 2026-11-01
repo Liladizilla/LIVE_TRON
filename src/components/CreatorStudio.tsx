@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, LogIn, Radio, Shield, Video, X } from 'lucide-react'
 import LiveBroadcastPanel from './LiveBroadcastPanel'
 import {
@@ -83,7 +83,7 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     </div>
   }
 
-  const submitAuth = async (event: React.FormEvent) => {
+  const submitAuth = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
     setError('')
