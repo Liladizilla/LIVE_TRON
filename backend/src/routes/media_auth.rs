@@ -1,3 +1,4 @@
+use super::auth::{authenticated_user, ApiError};
 use crate::state::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -5,11 +6,10 @@ use axum::{
     Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use chrono::Utc;
-use super::auth::{authenticated_user, ApiError};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -45,11 +45,20 @@ fn valid_publish_key(key: &str) -> bool {
         && key[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn create_read_token(stream_id: Uuid, user_id: Uuid, secret: &str, now: i64) -> Result<String, ApiError> {
+fn create_read_token(
+    stream_id: Uuid,
+    user_id: Uuid,
+    secret: &str,
+    now: i64,
+) -> Result<String, ApiError> {
     let expires_at = now + MEDIA_READ_TOKEN_TTL_SECONDS;
     let payload = format!("v1|{stream_id}|{user_id}|{expires_at}");
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "media_token_signing_failed"))?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "media_token_signing_failed",
+        )
+    })?;
     mac.update(payload.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
     Ok(format!("{}.{}", URL_SAFE_NO_PAD.encode(payload), signature))
@@ -60,7 +69,9 @@ fn verify_read_token(token: &str, stream_id: Uuid, secret: &str, now: i64) -> Op
     let payload = URL_SAFE_NO_PAD.decode(encoded_payload).ok()?;
     let payload_text = std::str::from_utf8(&payload).ok()?;
     let mut fields = payload_text.split('|');
-    if fields.next()? != "v1" { return None; }
+    if fields.next()? != "v1" {
+        return None;
+    }
     let token_stream_id = Uuid::parse_str(fields.next()?).ok()?;
     let user_id = Uuid::parse_str(fields.next()?).ok()?;
     let expires_at = fields.next()?.parse::<i64>().ok()?;
@@ -86,7 +97,10 @@ pub async fn create_media_read_token(
     headers: HeaderMap,
 ) -> Result<Json<MediaReadTokenResponse>, ApiError> {
     let user_id = authenticated_user(&headers, &state)?;
-    let db = state.db.as_ref().ok_or(ApiError(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable"))?;
+    let db = state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))?;
     let row = sqlx::query_as::<_, (Uuid, String, bool)>(
         "SELECT c.owner_user_id, s.status, c.is_mature FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1",
     )
@@ -98,16 +112,24 @@ pub async fn create_media_read_token(
     if row.1 != "live" || row.2 {
         return Err(ApiError(StatusCode::NOT_FOUND, "stream_not_found"));
     }
-    let visibility = sqlx::query_scalar::<_, String>("SELECT visibility FROM streams WHERE id = $1")
-        .bind(stream_id)
-        .fetch_one(db)
-        .await
-        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "media_token_authorization_failed"))?;
+    let visibility =
+        sqlx::query_scalar::<_, String>("SELECT visibility FROM streams WHERE id = $1")
+            .bind(stream_id)
+            .fetch_one(db)
+            .await
+            .map_err(|_| {
+                ApiError(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "media_token_authorization_failed",
+                )
+            })?;
     if visibility == "private" && user_id != row.0 {
         return Err(ApiError(StatusCode::NOT_FOUND, "stream_not_found"));
     }
-    let secret = state.mediamtx_auth_secret.as_deref()
-        .ok_or(ApiError(StatusCode::SERVICE_UNAVAILABLE, "media_authorization_not_configured"))?;
+    let secret = state.mediamtx_auth_secret.as_deref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "media_authorization_not_configured",
+    ))?;
     let token = create_read_token(stream_id, user_id, secret, Utc::now().timestamp())?;
     Ok(Json(MediaReadTokenResponse {
         token,
@@ -115,7 +137,11 @@ pub async fn create_media_read_token(
     }))
 }
 
-async fn authorize(db: &PgPool, input: &MediaAuthRequest, secret: &str) -> Result<bool, sqlx::Error> {
+async fn authorize(
+    db: &PgPool,
+    input: &MediaAuthRequest,
+    secret: &str,
+) -> Result<bool, sqlx::Error> {
     let Some(stream_id) = parse_stream_path(&input.path) else {
         return Ok(false);
     };
@@ -156,7 +182,9 @@ async fn authorize(db: &PgPool, input: &MediaAuthRequest, secret: &str) -> Resul
                 .fetch_one(db)
                 .await;
             }
-            let Some(user_id) = verify_read_token(&input.token, stream_id, secret, Utc::now().timestamp()) else {
+            let Some(user_id) =
+                verify_read_token(&input.token, stream_id, secret, Utc::now().timestamp())
+            else {
                 return Ok(false);
             };
             sqlx::query_scalar::<_, bool>(
@@ -222,7 +250,10 @@ pub async fn authorize_media(
 
 #[cfg(test)]
 mod tests {
-    use super::{constant_time_equal, create_read_token, parse_stream_path, valid_publish_key, verify_read_token};
+    use super::{
+        constant_time_equal, create_read_token, parse_stream_path, valid_publish_key,
+        verify_read_token,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -247,10 +278,22 @@ mod tests {
         let user_id = Uuid::new_v4();
         let secret = "a-long-mediamtx-shared-secret-for-tests";
         let token = create_read_token(stream_id, user_id, secret, 1_800_000_000).unwrap();
-        assert_eq!(verify_read_token(&token, stream_id, secret, 1_800_000_001), Some(user_id));
-        assert_eq!(verify_read_token(&token, Uuid::new_v4(), secret, 1_800_000_001), None);
-        assert_eq!(verify_read_token(&token, stream_id, "wrong-secret", 1_800_000_001), None);
-        assert_eq!(verify_read_token(&token, stream_id, secret, 1_800_000_301), None);
+        assert_eq!(
+            verify_read_token(&token, stream_id, secret, 1_800_000_001),
+            Some(user_id)
+        );
+        assert_eq!(
+            verify_read_token(&token, Uuid::new_v4(), secret, 1_800_000_001),
+            None
+        );
+        assert_eq!(
+            verify_read_token(&token, stream_id, "wrong-secret", 1_800_000_001),
+            None
+        );
+        assert_eq!(
+            verify_read_token(&token, stream_id, secret, 1_800_000_301),
+            None
+        );
     }
 
     #[test]
