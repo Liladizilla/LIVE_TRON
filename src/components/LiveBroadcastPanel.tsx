@@ -58,6 +58,7 @@ export default function LiveBroadcastPanel({
   const peerRef = useRef<RTCPeerConnection | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const sessionRef = useRef<URL | null>(null)
+  const requestRef = useRef<AbortController | null>(null)
   const activeRef = useRef(false)
   const [status, setStatus] = useState<BroadcastStatus>('idle')
   const [error, setError] = useState('')
@@ -70,6 +71,8 @@ export default function LiveBroadcastPanel({
 
   const stopLocalMedia = () => {
     activeRef.current = false
+    requestRef.current?.abort()
+    requestRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     if (previewRef.current) previewRef.current.srcObject = null
@@ -111,6 +114,8 @@ export default function LiveBroadcastPanel({
       if (!baseUrl.trim()) throw new Error('Media ingest is not configured. Set the MediaMTX base URL before broadcasting.')
 
       const endpoint = resolveWhipEndpoint(baseUrl, streamId)
+      const controller = new AbortController()
+      requestRef.current = controller
       setStatus('requesting')
       const localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -138,6 +143,7 @@ export default function LiveBroadcastPanel({
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
       await waitForIceGatheringComplete(peer)
+      if (controller.signal.aborted || peerRef.current !== peer) throw new Error('Broadcast start was cancelled.')
       const localSdp = peer.localDescription?.sdp
       if (!localSdp) throw new Error('The browser did not produce a WebRTC offer.')
 
@@ -149,6 +155,7 @@ export default function LiveBroadcastPanel({
           Authorization: `Bearer ${publishingKey}`,
         },
         body: localSdp,
+        signal: controller.signal,
       })
 
       if (response.status === 401 || response.status === 403) {
@@ -164,10 +171,16 @@ export default function LiveBroadcastPanel({
       const sessionUrl = new URL(location, endpoint)
       if (sessionUrl.origin !== endpoint.origin) throw new Error('MediaMTX returned a cross-origin session URL; refusing to send the publishing key to another host.')
       sessionRef.current = sessionUrl
+      if (controller.signal.aborted || peerRef.current !== peer) {
+        await deleteSession()
+        throw new Error('Broadcast start was cancelled.')
+      }
 
       const answer = await response.text()
       if (!answer.trim()) throw new Error('MediaMTX returned an empty SDP answer.')
       await peer.setRemoteDescription({ type: 'answer', sdp: answer })
+      if (controller.signal.aborted || peerRef.current !== peer) throw new Error('Broadcast start was cancelled.')
+      requestRef.current = null
       activeRef.current = true
       setStatus(peer.connectionState === 'connected' ? 'live' : 'connecting')
     } catch (cause) {
