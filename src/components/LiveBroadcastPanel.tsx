@@ -125,8 +125,12 @@ export default function LiveBroadcastPanel({
       peer.addEventListener('connectionstatechange', () => {
         if (peer.connectionState === 'connected' && activeRef.current) setStatus('live')
         if (peer.connectionState === 'failed' && activeRef.current) {
+          activeRef.current = false
           setError('WebRTC connection failed. Check TURN credentials, UDP reachability, and MediaMTX ICE settings.')
-          setStatus('error')
+          void deleteSession().finally(() => {
+            stopLocalMedia()
+            setStatus('error')
+          })
         }
       })
 
