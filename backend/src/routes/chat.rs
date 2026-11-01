@@ -1,13 +1,20 @@
 use super::auth::{authenticated_user, ApiError};
 use crate::state::AppState;
-use axum::{extract::{Path, Query, State}, http::{HeaderMap, StatusCode}, Json};
+use axum::{
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    Json,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 fn pool(state: &AppState) -> Result<&PgPool, ApiError> {
-    state.db.as_ref().ok_or(ApiError(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable"))
+    state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))
 }
 
 #[derive(Debug, FromRow, Serialize)]
@@ -94,7 +101,9 @@ pub async fn send(
     }
     ensure_chat_access(db, stream_id, Some(user_id)).await?;
 
-    let mut tx = db.begin().await
+    let mut tx = db
+        .begin()
+        .await
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_send_failed"))?;
     let lock_key = format!("{stream_id}:{user_id}");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -122,7 +131,8 @@ pub async fn send(
     .fetch_one(&mut *tx)
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_send_failed"))?;
-    tx.commit().await
+    tx.commit()
+        .await
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_send_failed"))?;
     Ok((StatusCode::CREATED, Json(message)))
 }
