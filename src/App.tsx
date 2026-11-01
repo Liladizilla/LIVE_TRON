@@ -107,6 +107,9 @@ function App() {
           return
         }
         reconnectDelay = 1500
+        void loadHistory().catch(() => {
+          if (active) setChatStatus('Connected · history refresh failed')
+        })
         socket.onmessage = (event) => {
           if (!active || typeof event.data !== 'string') return
           try {
