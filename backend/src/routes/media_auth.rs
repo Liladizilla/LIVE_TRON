@@ -101,29 +101,19 @@ pub async fn create_media_read_token(
         StatusCode::SERVICE_UNAVAILABLE,
         "database_unavailable",
     ))?;
-    let row = sqlx::query_as::<_, (Uuid, String, bool)>(
-        "SELECT c.owner_user_id, s.status, c.is_mature FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1",
+    let row = sqlx::query_as::<_, (Uuid, String, String, bool)>(
+        "SELECT c.owner_user_id, s.status, s.visibility, c.is_mature FROM streams s JOIN channels c ON c.id = s.channel_id JOIN users viewer ON viewer.id = $2 WHERE s.id = $1",
     )
     .bind(stream_id)
+    .bind(user_id)
     .fetch_optional(db)
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "media_token_authorization_failed"))?
     .ok_or(ApiError(StatusCode::NOT_FOUND, "stream_not_found"))?;
-    if row.1 != "live" || row.2 {
+    if row.1 != "live" || row.3 {
         return Err(ApiError(StatusCode::NOT_FOUND, "stream_not_found"));
     }
-    let visibility =
-        sqlx::query_scalar::<_, String>("SELECT visibility FROM streams WHERE id = $1")
-            .bind(stream_id)
-            .fetch_one(db)
-            .await
-            .map_err(|_| {
-                ApiError(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "media_token_authorization_failed",
-                )
-            })?;
-    if visibility == "private" && user_id != row.0 {
+    if row.2 == "private" && user_id != row.0 {
         return Err(ApiError(StatusCode::NOT_FOUND, "stream_not_found"));
     }
     let secret = state.mediamtx_auth_secret.as_deref().ok_or(ApiError(
