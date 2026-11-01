@@ -114,6 +114,9 @@ function App() {
             if (payload.type === 'message' && payload.message) {
               mergeMessages([payload.message])
               setChatStatus('Connected · messages arrive live')
+            } else if (payload.type === 'presence' && typeof (payload as { participants?: unknown }).participants === 'number') {
+              const participants = (payload as { participants: number }).participants
+              setChatStatus(`Live chat · ${participants} connected`)
             } else if (payload.type === 'resync_required') {
               void loadHistory().catch(() => setChatStatus('Chat history needs to be refreshed.'))
             } else if (payload.type === 'ready') {
