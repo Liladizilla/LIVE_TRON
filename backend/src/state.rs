@@ -6,6 +6,10 @@ use uuid::Uuid;
 pub struct SignalTicket {
     pub stream_id: Uuid,
     pub publisher: bool,
+    // Store only hashed publisher credentials or the authenticated viewer ID.
+    // This lets the WebSocket upgrade re-check access after ticket issuance.
+    pub publisher_key_hash: Option<String>,
+    pub viewer_user_id: Option<Uuid>,
     pub expires_at: Instant,
 }
 
