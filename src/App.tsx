@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import LiveMediaPlayer from './components/LiveMediaPlayer'
 import CreatorStudio from './components/CreatorStudio'
 import type { ApiChatMessage, ApiUser } from './lib/api'
-import { fetchLiveStreams, fetchStreamChat, isApiConfigured, sendStreamChatMessage, toDiscoveryStream } from './lib/api'
+import { connectStreamChatSocket, fetchLiveStreams, fetchStreamChat, isApiConfigured, sendStreamChatMessage, toDiscoveryStream } from './lib/api'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
   Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
@@ -74,38 +74,87 @@ function App() {
 
   useEffect(() => {
     if (!selectedStream) return
-    const isStreamId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id)
+    const streamId = selectedStream.id
+    const isStreamId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(streamId)
     if (!isStreamId || !isApiConfigured()) {
       setChatMessages([])
       setChatStatus('Live chat is available on connected LIVE_TRON broadcasts.')
       return
     }
     let active = true
-    let inFlight = false
+    let socket: WebSocket | null = null
+    let reconnectTimer = 0
+    let reconnectDelay = 1500
     const controller = new AbortController()
-    const load = async () => {
-      if (inFlight) return
-      inFlight = true
+    const mergeMessages = (incoming: ApiChatMessage[]) => {
+      setChatMessages((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]))
+        incoming.forEach((item) => byId.set(item.id, item))
+        return [...byId.values()]
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))
+          .slice(-100)
+      })
+    }
+    const loadHistory = async () => {
+      const history = await fetchStreamChat(streamId, controller.signal)
+      if (active) mergeMessages(history)
+    }
+    const connect = async () => {
       try {
-        const messages = await fetchStreamChat(selectedStream.id, controller.signal)
-        if (active) {
-          setChatMessages(messages)
-          setChatStatus('')
+        socket = await connectStreamChatSocket(streamId)
+        if (!active) {
+          socket.close()
+          return
         }
+        reconnectDelay = 1500
+        socket.onmessage = (event) => {
+          if (!active || typeof event.data !== 'string') return
+          try {
+            const payload = JSON.parse(event.data) as { type?: string; message?: ApiChatMessage }
+            if (payload.type === 'message' && payload.message) {
+              mergeMessages([payload.message])
+              setChatStatus('Connected · messages arrive live')
+            } else if (payload.type === 'resync_required') {
+              void loadHistory().catch(() => setChatStatus('Chat history needs to be refreshed.'))
+            } else if (payload.type === 'ready') {
+              setChatStatus('Connected · messages arrive live')
+            }
+          } catch {
+            setChatStatus('Received an invalid chat event.')
+          }
+        }
+        socket.onclose = () => {
+          if (!active) return
+          setChatStatus('Chat disconnected. Reconnecting…')
+          reconnectTimer = window.setTimeout(() => {
+            reconnectDelay = Math.min(reconnectDelay * 2, 15000)
+            void connect()
+          }, reconnectDelay)
+        }
+        socket.onerror = () => setChatStatus('Chat connection interrupted.')
       } catch (cause) {
-        if (active && !controller.signal.aborted) {
-          setChatStatus(cause instanceof Error ? cause.message : 'Unable to load live chat.')
-        }
-      } finally {
-        inFlight = false
+        if (!active) return
+        setChatStatus(cause instanceof Error ? cause.message : 'Unable to connect to live chat.')
+        reconnectTimer = window.setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, 15000)
+          void connect()
+        }, reconnectDelay)
       }
     }
-    void load()
-    const interval = window.setInterval(() => { void load() }, 2500)
+    setChatMessages([])
+    setChatStatus('Loading chat history…')
+    void loadHistory().then(() => {
+      if (active) void connect()
+    }).catch((cause) => {
+      if (active && !controller.signal.aborted) {
+        setChatStatus(cause instanceof Error ? cause.message : 'Unable to load live chat.')
+      }
+    })
     return () => {
       active = false
       controller.abort()
-      window.clearInterval(interval)
+      window.clearTimeout(reconnectTimer)
+      socket?.close(1000, 'Stream changed')
     }
   }, [selectedStream?.id])
 
@@ -234,7 +283,7 @@ function App() {
                 <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
                 <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span></div>)}</div>
                 <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} disabled={!canUseChat} placeholder={canUseChat ? "Sign in to join the conversation…" : "Chat unavailable in preview mode"} aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!canUseChat || !chatMessage.trim() || chatSending}><Send size={16} /></button></form>
-                <div className="chat-footer" role="status">{chatStatus || 'Messages refresh automatically · 500 character limit'}</div>
+                <div className="chat-footer" role="status">{chatStatus || 'Live connection · 500 character limit'}</div>
               </aside>
             </div>
           </section>
