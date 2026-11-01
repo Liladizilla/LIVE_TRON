@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import LiveMediaPlayer from './components/LiveMediaPlayer'
 import CreatorStudio from './components/CreatorStudio'
-import type { ApiUser } from './lib/api'
-import { fetchLiveStreams, isApiConfigured, toDiscoveryStream } from './lib/api'
+import type { ApiChatMessage, ApiUser } from './lib/api'
+import { fetchLiveStreams, fetchStreamChat, isApiConfigured, sendStreamChatMessage, toDiscoveryStream } from './lib/api'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
   Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
@@ -20,11 +20,9 @@ function App() {
   const [saved, setSaved] = useState<string[]>([])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [chatMessage, setChatMessage] = useState('')
-  const [chatMessages, setChatMessages] = useState([
-    { name: 'jayden', message: 'This lighting is unreal.' },
-    { name: 'lena.wav', message: 'Just joined. What did I miss?' },
-    { name: 'pixelpilot', message: 'The detail on that build 👀' },
-  ])
+  const [chatMessages, setChatMessages] = useState<ApiChatMessage[]>([])
+  const [chatStatus, setChatStatus] = useState('Chat loads when a live broadcast is connected.')
+  const [chatSending, setChatSending] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [installState, setInstallState] = useState<'hidden' | 'available' | 'installed'>('hidden')
   const [notice, setNotice] = useState('')
@@ -74,6 +72,43 @@ function App() {
     return () => controller.abort()
   }, [activeCategory, query])
 
+  useEffect(() => {
+    if (!selectedStream) return
+    const isStreamId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id)
+    if (!isStreamId || !isApiConfigured()) {
+      setChatMessages([])
+      setChatStatus('Live chat is available on connected LIVE_TRON broadcasts.')
+      return
+    }
+    let active = true
+    let inFlight = false
+    const controller = new AbortController()
+    const load = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const messages = await fetchStreamChat(selectedStream.id, controller.signal)
+        if (active) {
+          setChatMessages(messages)
+          setChatStatus('')
+        }
+      } catch (cause) {
+        if (active && !controller.signal.aborted) {
+          setChatStatus(cause instanceof Error ? cause.message : 'Unable to load live chat.')
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+    void load()
+    const interval = window.setInterval(() => { void load() }, 2500)
+    return () => {
+      active = false
+      controller.abort()
+      window.clearInterval(interval)
+    }
+  }, [selectedStream?.id])
+
   const catalogue = isApiConfigured() ? (apiStreams ?? []) : streams
   const filteredStreams = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -98,17 +133,23 @@ function App() {
   }
   const openStream = (stream: Stream) => {
     setSelectedStream(stream)
-    setChatMessages([
-      { name: 'jayden', message: 'This lighting is unreal.' },
-      { name: 'lena.wav', message: 'Just joined. What did I miss?' },
-      { name: 'pixelpilot', message: 'The detail on that build 👀' },
-    ])
+    setChatMessages([])
+    setChatStatus('Connecting to live chat…')
   }
-  const sendChat = () => {
-    const message = chatMessage.trim()
-    if (!message) return
-    setChatMessages((current) => [...current, { name: 'you', message }])
-    setChatMessage('')
+  const sendChat = async () => {
+    const body = chatMessage.trim()
+    if (!body || !selectedStream || chatSending) return
+    setChatSending(true)
+    setChatStatus('')
+    try {
+      const message = await sendStreamChatMessage(selectedStream.id, body)
+      setChatMessages((current) => [...current.filter((item) => item.id !== message.id), message])
+      setChatMessage('')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to send chat message.')
+    } finally {
+      setChatSending(false)
+    }
   }
   const installApp = async () => {
     if (!installPrompt) return
@@ -190,9 +231,9 @@ function App() {
               <aside className="chat-panel">
                 <div className="chat-header"><div><MessageCircle size={17} /><strong>Live chat</strong></div><span>COMMUNITY</span></div>
                 <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
-                <div className="chat-feed">{chatMessages.map((item, index) => <div className="chat-line" key={`${item.name}-${index}`}><strong className={item.name === 'you' ? 'chat-you' : ''}>{item.name}</strong><span>{item.message}</span></div>)}</div>
-                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} placeholder="Send a message..." aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!chatMessage.trim()}><Send size={16} /></button></form>
-                <div className="chat-footer">Guest mode · chat is local preview only</div>
+                <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span></div>)}</div>
+                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} placeholder="Sign in to join the conversation…" aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!chatMessage.trim() || chatSending}><Send size={16} /></button></form>
+                <div className="chat-footer" role="status">{chatStatus || 'Messages refresh automatically · 500 character limit'}</div>
               </aside>
             </div>
           </section>
