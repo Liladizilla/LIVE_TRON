@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import LiveMediaPlayer from './components/LiveMediaPlayer'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
   Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
@@ -142,11 +143,15 @@ function App() {
             <button className="back-link" onClick={() => setSelectedStream(null)}><ArrowLeft size={16} /> Back to discovery</button>
             <div className="watch-layout">
               <div className="watch-main">
-                <div className="watch-player" style={{ backgroundImage: `linear-gradient(180deg, transparent 55%, rgba(0,0,0,.72)), url("${selectedStream.image}")` }}>
-                  <div className="player-topline"><span className="live-pill"><i /> LIVE</span><span className="player-viewers"><Users size={14} /> {formatViewers(selectedStream.viewers)} watching</span></div>
-                  <div className="player-center"><button className="play-button" aria-label="Play stream preview"><Play size={25} fill="currentColor" /></button><span>Stream preview</span></div>
-                  <div className="player-bottomline"><span><Radio size={15} /> LIVE_TRON PLAYER</span><span>Preview experience · playback integration pending</span></div>
-                </div>
+                {/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id) && import.meta.env.VITE_MEDIAMTX_WHEP_BASE_URL ? (
+                  <LiveMediaPlayer streamId={selectedStream.id} />
+                ) : (
+                  <div className="watch-player" style={{ backgroundImage: `linear-gradient(180deg, transparent 55%, rgba(0,0,0,.72)), url("${selectedStream.image}")` }}>
+                    <div className="player-topline"><span className="live-pill"><i /> LIVE</span><span className="player-viewers"><Users size={14} /> {formatViewers(selectedStream.viewers)} watching</span></div>
+                    <div className="player-center"><button className="play-button" aria-label="Play stream preview"><Play size={25} fill="currentColor" /></button><span>Stream preview</span></div>
+                    <div className="player-bottomline"><span><Radio size={15} /> LIVE_TRON PLAYER</span><span>Preview experience · playback integration pending</span></div>
+                  </div>
+                )}
                 <div className="watch-title-row"><div><div className="eyebrow">{selectedStream.category.toUpperCase()} <span>·</span> LIVE NOW</div><h1>{selectedStream.title}</h1></div><button className={saved.includes(selectedStream.id) ? 'icon-button saved' : 'icon-button'} onClick={() => toggleSave(selectedStream)} aria-label="Save stream"><Bookmark size={19} /></button></div>
                 <p className="watch-description">{selectedStream.description}</p>
                 <div className="channel-strip"><div className="channel-avatar" style={{ background: selectedStream.accent }}>{selectedStream.avatar}</div><div className="channel-details"><strong>{selectedStream.creator} {selectedStream.verified && <ShieldCheck size={15} />}</strong><span>{selectedStream.handle}</span></div><button className={isFollowing(selectedStream) ? 'follow-button following' : 'follow-button'} onClick={() => toggleFollow(selectedStream)}>{isFollowing(selectedStream) ? <><Check size={15} /> Following</> : <><Plus size={15} /> Follow</>}</button></div>
