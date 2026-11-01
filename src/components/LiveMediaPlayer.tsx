@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchIceConfig } from '../lib/api'
 
 type PlayerStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -11,23 +12,32 @@ type LiveMediaPlayerProps = {
 const STREAM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const ICE_GATHERING_TIMEOUT_MS = 15_000
 
-function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
+function waitForIceGatheringComplete(peer: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException('Playback connection was cancelled.', 'AbortError'))
   if (peer.iceGatheringState === 'complete') return Promise.resolve()
 
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      peer.removeEventListener('icegatheringstatechange', onStateChange)
-      reject(new Error('ICE gathering timed out. Check the media server and network configuration.'))
-    }, ICE_GATHERING_TIMEOUT_MS)
-
-    const onStateChange = () => {
-      if (peer.iceGatheringState !== 'complete') return
+    const cleanup = () => {
       window.clearTimeout(timeout)
       peer.removeEventListener('icegatheringstatechange', onStateChange)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const timeout = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('ICE gathering timed out. Check the media server and network configuration.'))
+    }, ICE_GATHERING_TIMEOUT_MS)
+    const onStateChange = () => {
+      if (peer.iceGatheringState !== 'complete') return
+      cleanup()
       resolve()
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(new DOMException('Playback connection was cancelled.', 'AbortError'))
     }
 
     peer.addEventListener('icegatheringstatechange', onStateChange)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -117,9 +127,17 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
           throw new Error('The MediaMTX base URL must be a clean origin without credentials or query parameters.')
         }
         const endpoint = `${mediaOrigin.origin}/${encodeURIComponent(streamId)}/whep`
+        try {
+          const authenticatedIceServers = await fetchIceConfig(requestController.signal)
+          if (!disposed) peer.setConfiguration({ iceServers: authenticatedIceServers })
+        } catch (iceError) {
+          if (requestController.signal.aborted) throw iceError
+          // Public viewers can still attempt direct ICE with the configured STUN fallback.
+        }
+        if (disposed) return
         const offer = await peer.createOffer()
         await peer.setLocalDescription(offer)
-        await waitForIceGatheringComplete(peer)
+        await waitForIceGatheringComplete(peer, requestController.signal)
 
         if (disposed) return
         const localSdp = peer.localDescription?.sdp
