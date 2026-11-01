@@ -171,10 +171,10 @@ pub async fn create_ticket(
     ensure_chat_access(db, stream_id, Some(user_id)).await?;
     let account_exists =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
-    .bind(user_id)
-    .fetch_one(db)
-    .await
-    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_failed"))?;
+            .bind(user_id)
+            .fetch_one(db)
+            .await
+            .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_failed"))?;
     if !account_exists {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "user_not_found"));
     }
