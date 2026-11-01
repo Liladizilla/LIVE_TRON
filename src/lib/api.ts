@@ -162,6 +162,29 @@ export type CreatedStream = {
   publishing_key_notice: string
 }
 
+export type IceServerConfig = {
+  urls: string | string[]
+  username?: string
+  credential?: string
+}
+
+export type IceConfigResponse = {
+  ice_servers: IceServerConfig[]
+  expires_in: number
+}
+
+export async function fetchIceConfig(signal?: AbortSignal): Promise<RTCIceServer[]> {
+  const response = await authenticatedRequest<IceConfigResponse>('/v1/media/ice-config', { signal })
+  if (!Array.isArray(response.ice_servers) || response.ice_servers.length === 0) {
+    throw new Error('The API did not return any ICE servers.')
+  }
+  return response.ice_servers.map((server) => ({
+    urls: server.urls,
+    ...(server.username ? { username: server.username } : {}),
+    ...(server.credential ? { credential: server.credential } : {}),
+  }))
+}
+
 export async function fetchMyChannels(): Promise<ApiChannel[]> {
   return authenticatedRequest<ApiChannel[]>('/v1/me/channels')
 }
