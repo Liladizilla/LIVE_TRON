@@ -380,27 +380,39 @@ pub async fn connect(
         .on_upgrade(move |socket| {
             handle_socket(
                 socket,
-                state_for_socket,
-                stream_id,
-                participant_id,
-                role,
-                sender,
-                receiver,
-                existing_peers,
+                SocketContext {
+                    state: state_for_socket,
+                    stream_id,
+                    participant_id,
+                    role,
+                    room_sender: sender,
+                    room_receiver: receiver,
+                    existing_peers,
+                },
             )
         }))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
+struct SocketContext {
     state: AppState,
     stream_id: Uuid,
     participant_id: Uuid,
     role: PeerRole,
     room_sender: broadcast::Sender<String>,
-    mut room_receiver: broadcast::Receiver<String>,
+    room_receiver: broadcast::Receiver<String>,
     existing_peers: Vec<(Uuid, bool)>,
-) {
+}
+
+async fn handle_socket(socket: WebSocket, context: SocketContext) {
+    let SocketContext {
+        state,
+        stream_id,
+        participant_id,
+        role,
+        room_sender,
+        mut room_receiver,
+        existing_peers,
+    } = context;
     let (mut outgoing, mut incoming) = socket.split();
     let hello = json!({
         "type": "ready",
