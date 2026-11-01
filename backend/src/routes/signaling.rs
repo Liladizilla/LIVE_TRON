@@ -68,6 +68,13 @@ pub struct IceConfig {
     expires_in: u64,
 }
 
+#[derive(Serialize)]
+pub struct SignalTicketResponse {
+    ticket: String,
+    expires_in: u64,
+    websocket_protocols: [String; 2],
+}
+
 pub async fn ice_config(
     State(state): State<AppState>,
     headers: HeaderMap,
