@@ -51,6 +51,9 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [channel, setChannel] = useState<ApiChannel | null>(null)
+  const [channelsLoading, setChannelsLoading] = useState(false)
+  const [channelsLoadFailed, setChannelsLoadFailed] = useState(false)
+  const [channelReload, setChannelReload] = useState(0)
   const [slug, setSlug] = useState('')
   const [channelTitle, setChannelTitle] = useState('')
   const [channelDescription, setChannelDescription] = useState('')
@@ -63,13 +66,21 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
   useEffect(() => {
     if (!user || !isApiConfigured()) return
     let active = true
+    setChannelsLoading(true)
+    setChannelsLoadFailed(false)
+    setError('')
     fetchMyChannels().then((items) => {
       if (active && items.length > 0) setChannel(items[0])
     }).catch((cause: unknown) => {
-      if (active) setError(messageFor(cause))
+      if (active) {
+        setChannelsLoadFailed(true)
+        setError(messageFor(cause))
+      }
+    }).finally(() => {
+      if (active) setChannelsLoading(false)
     })
     return () => { active = false }
-  }, [user])
+  }, [user, channelReload])
 
   if (!open) return null
 
@@ -181,7 +192,9 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
         <button className="studio-text-button" type="button" onClick={() => { setRegisterMode(!registerMode); setError('') }}>{registerMode ? 'Already registered? Sign in' : 'New to LIVE_TRON? Create an account'}</button>
       </form> : <div className="studio-workspace">
         <div className="studio-account"><div className="studio-user-mark">{user.display_name.slice(0,1).toUpperCase()}</div><div><strong>{user.display_name}</strong><span>{user.email}</span></div><button className="studio-text-button" onClick={signOut} disabled={busy}>Sign out</button></div>
-        {!channel ? <form className="studio-form" onSubmit={submitChannel}>
+        {!channel && channelsLoading ? <div className="studio-form"><div className="studio-step"><Video size={17} /> LOADING CHANNELS</div><p className="studio-muted">Checking channels owned by this account before offering channel creation.</p></div> : null}
+        {!channel && channelsLoadFailed ? <div className="studio-form"><p className="studio-error" role="alert">{error}</p><button className="studio-primary" type="button" onClick={() => setChannelReload((value) => value + 1)}>Retry channel lookup</button></div> : null}
+        {!channel && !channelsLoading && !channelsLoadFailed ? <form className="studio-form" onSubmit={submitChannel}>
           <div className="studio-step"><Video size={17} /> STEP 1 / CHANNEL</div>
           <p className="studio-muted">Create your creator channel. Its handle becomes your public channel address.</p>
           <label>Channel handle<input value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))} minLength={3} maxLength={48} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="your-channel" required /></label>
