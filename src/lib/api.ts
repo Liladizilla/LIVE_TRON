@@ -133,7 +133,7 @@ export async function getCurrentUser(): Promise<ApiUser> {
 export async function logoutAccount(): Promise<void> {
   try {
     if (refreshToken) {
-      await authenticatedRequest<void>('/v1/auth/logout', {
+      await rawRequest<void>('/v1/auth/logout', {
         method: 'POST',
         body: JSON.stringify({ refresh_token: refreshToken }),
       })
