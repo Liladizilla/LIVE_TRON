@@ -1,7 +1,13 @@
 use sqlx::PgPool;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
+
+pub struct SignalTicket {
+    pub stream_id: Uuid,
+    pub publisher: bool,
+    pub expires_at: Instant,
+}
 
 pub struct SignalRoom {
     pub sender: broadcast::Sender<String>,
@@ -24,6 +30,7 @@ pub struct AppState {
     pub ice: IceSettings,
     pub allowed_origins: Arc<Vec<String>>,
     pub(crate) signal_rooms: Arc<Mutex<HashMap<Uuid, SignalRoom>>>,
+    pub(crate) signal_tickets: Arc<Mutex<HashMap<String, SignalTicket>>>,
 }
 
 impl AppState {
