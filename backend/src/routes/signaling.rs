@@ -287,7 +287,10 @@ pub async fn connect(
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?
     } else {
         let Some(viewer_id) = ticket_record.viewer_user_id else {
-            return Err(ApiError(StatusCode::UNAUTHORIZED, "signal_ticket_expired_or_used"));
+            return Err(ApiError(
+                StatusCode::UNAUTHORIZED,
+                "signal_ticket_expired_or_used",
+            ));
         };
         let stream = sqlx::query_as::<_, (Uuid, String, String)>(
             "SELECT c.owner_user_id, s.status, s.visibility FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1",
