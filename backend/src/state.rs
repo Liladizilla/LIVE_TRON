@@ -6,7 +6,7 @@ use uuid::Uuid;
 pub struct SignalRoom {
     pub sender: broadcast::Sender<String>,
     pub publisher: Option<Uuid>,
-    pub members: usize,
+    pub participants: HashMap<Uuid, bool>,
 }
 
 #[derive(Clone, Default)]
