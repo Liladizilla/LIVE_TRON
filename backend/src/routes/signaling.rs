@@ -347,10 +347,25 @@ pub async fn connect(
     drop(rooms);
 
     let state_for_socket = state.clone();
+    let state_for_failed_upgrade = state.clone();
     Ok(ws
         .protocols(["live-tron.signal.v1"])
         .max_message_size(MAX_SIGNAL_BYTES)
         .max_frame_size(MAX_SIGNAL_BYTES)
+        .on_failed_upgrade(move |_| {
+            // The participant is reserved before the HTTP upgrade response is sent.
+            // If the handshake fails, release that reservation so a publisher slot
+            // cannot remain stuck until the process restarts.
+            tokio::spawn(async move {
+                cleanup_participant(
+                    &state_for_failed_upgrade,
+                    stream_id,
+                    participant_id,
+                    role,
+                )
+                .await;
+            });
+        })
         .on_upgrade(move |socket| {
             handle_socket(
                 socket,
@@ -634,5 +649,113 @@ mod tests {
         headers.insert(ORIGIN, "https://live.example".parse().unwrap());
         let allowed = vec!["https://live.example".to_owned()];
         assert!(super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[tokio::test]
+    async fn failed_upgrade_cleanup_releases_publisher_reservation() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let participant_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(participant_id, true);
+            rooms.insert(stream_id, SignalRoom {
+                sender,
+                publisher: Some(participant_id),
+                participants,
+            });
+        }
+
+        super::cleanup_participant(
+            &state,
+            stream_id,
+            participant_id,
+            super::PeerRole::Publisher,
+        ).await;
+
+        let rooms = state.signal_rooms.lock().await;
+        assert!(!rooms.contains_key(&stream_id));
+    }
+
+    #[tokio::test]
+    async fn viewer_cleanup_preserves_active_publisher() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(publisher_id, true);
+            participants.insert(viewer_id, false);
+            rooms.insert(stream_id, SignalRoom {
+                sender,
+                publisher: Some(publisher_id),
+                participants,
+            });
+        }
+
+        super::cleanup_participant(
+            &state,
+            stream_id,
+            viewer_id,
+            super::PeerRole::Viewer,
+        ).await;
+
+        let rooms = state.signal_rooms.lock().await;
+        let room = rooms.get(&stream_id).expect("publisher room must remain");
+        assert_eq!(room.publisher, Some(publisher_id));
+        assert!(room.participants.contains_key(&publisher_id));
+        assert!(!room.participants.contains_key(&viewer_id));
+    }
+
+    #[tokio::test]
+    async fn publisher_cleanup_does_not_remove_other_viewers() {
+        use crate::state::{AppState, SignalRoom};
+        use std::collections::HashMap;
+        use tokio::sync::broadcast;
+        use uuid::Uuid;
+
+        let state = AppState::default();
+        let stream_id = Uuid::new_v4();
+        let publisher_id = Uuid::new_v4();
+        let viewer_id = Uuid::new_v4();
+        let (sender, _) = broadcast::channel(8);
+        {
+            let mut rooms = state.signal_rooms.lock().await;
+            let mut participants = HashMap::new();
+            participants.insert(publisher_id, true);
+            participants.insert(viewer_id, false);
+            rooms.insert(stream_id, SignalRoom {
+                sender,
+                publisher: Some(publisher_id),
+                participants,
+            });
+        }
+
+        super::cleanup_participant(
+            &state,
+            stream_id,
+            publisher_id,
+            super::PeerRole::Publisher,
+        ).await;
+
+        let rooms = state.signal_rooms.lock().await;
+        let room = rooms.get(&stream_id).expect("viewer room must remain");
+        assert_eq!(room.publisher, None);
+        assert!(room.participants.contains_key(&viewer_id));
     }
 }
