@@ -373,13 +373,8 @@ pub async fn connect(
             // If the handshake fails, release that reservation so a publisher slot
             // cannot remain stuck until the process restarts.
             tokio::spawn(async move {
-                cleanup_participant(
-                    &state_for_failed_upgrade,
-                    stream_id,
-                    participant_id,
-                    role,
-                )
-                .await;
+                cleanup_participant(&state_for_failed_upgrade, stream_id, participant_id, role)
+                    .await;
             });
         })
         .on_upgrade(move |socket| {
@@ -547,10 +542,7 @@ fn create_turn_credential(
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
 }
 
-fn peer_roster(
-    participants: &HashMap<Uuid, bool>,
-    joining_role: PeerRole,
-) -> Vec<(Uuid, bool)> {
+fn peer_roster(participants: &HashMap<Uuid, bool>, joining_role: PeerRole) -> Vec<(Uuid, bool)> {
     participants
         .iter()
         .filter_map(|(id, is_publisher)| {
@@ -688,7 +680,9 @@ mod tests {
         let viewer_roster = super::peer_roster(&participants, PeerRole::Viewer);
 
         assert_eq!(publisher_roster.len(), 2);
-        assert!(publisher_roster.iter().all(|(_, is_publisher)| !*is_publisher));
+        assert!(publisher_roster
+            .iter()
+            .all(|(_, is_publisher)| !*is_publisher));
         assert_eq!(viewer_roster, vec![(publisher_id, true)]);
     }
 
@@ -803,13 +797,7 @@ mod tests {
             );
         }
 
-        super::cleanup_participant(
-            &state,
-            stream_id,
-            viewer_id,
-            super::PeerRole::Viewer,
-        )
-        .await;
+        super::cleanup_participant(&state, stream_id, viewer_id, super::PeerRole::Viewer).await;
 
         let rooms = state.signal_rooms.lock().await;
         let room = rooms.get(&stream_id).expect("publisher room must remain");
@@ -845,13 +833,8 @@ mod tests {
             );
         }
 
-        super::cleanup_participant(
-            &state,
-            stream_id,
-            publisher_id,
-            super::PeerRole::Publisher,
-        )
-        .await;
+        super::cleanup_participant(&state, stream_id, publisher_id, super::PeerRole::Publisher)
+            .await;
 
         let rooms = state.signal_rooms.lock().await;
         let room = rooms.get(&stream_id).expect("viewer room must remain");
