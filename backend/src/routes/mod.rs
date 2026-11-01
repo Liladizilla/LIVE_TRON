@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod channels;
+pub mod chat;
 mod health;
 mod media_auth;
 mod meta;
@@ -44,6 +45,7 @@ pub fn router() -> Router<AppState> {
             get(streams::list_for_channel).post(streams::create),
         )
         .route("/v1/streams", get(streams::discover))
+        .route("/v1/streams/{stream_id}/chat", get(chat::history).post(chat::send))
         .route("/v1/media/ice-config", get(signaling::ice_config))
         .route(
             "/v1/streams/{stream_id}/media-token",
