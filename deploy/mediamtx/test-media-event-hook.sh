@@ -30,12 +30,12 @@ if grep -F -- 'test-only-secret-that-is-long-enough' "$ARGS_CAPTURE" >/dev/null;
 fi
 grep -F -- '--retry' "$ARGS_CAPTURE" >/dev/null
 grep -F -- '--retry-all-errors' "$ARGS_CAPTURE" >/dev/null
-grep -F -- "\"stream_id\":\"$stream_id\"" "$CAPTURE" >/dev/null
-grep -F -- '"event_type":"ingest_started"' "$CAPTURE" >/dev/null
-grep -F -- 'http://live-tron-api:8080/internal/v1/media/events' "$CAPTURE" >/dev/null
+grep -F -- "\"stream_id\":\"$stream_id\"" "$ARGS_CAPTURE" >/dev/null
+grep -F -- '"event_type":"ingest_started"' "$ARGS_CAPTURE" >/dev/null
+grep -F -- 'http://live-tron-api:8080/internal/v1/media/events' "$ARGS_CAPTURE" >/dev/null
 
 /bin/sh "$root/live-tron-media-event.sh" ingest_ended "$stream_id"
-grep -F -- '"event_type":"ingest_ended"' "$CAPTURE" >/dev/null
+grep -F -- '"event_type":"ingest_ended"' "$ARGS_CAPTURE" >/dev/null
 
 if /bin/sh "$root/live-tron-media-event.sh" unsupported "$stream_id" >/dev/null 2>&1; then
   echo "unsupported event type was accepted" >&2
