@@ -22,7 +22,7 @@ export CAPTURE="$tmp/curl-args"
 export ARGS_CAPTURE="$tmp/curl-argv"
 export LIVE_TRON_MEDIA_EVENT_SECRET="test-only-secret-that-is-long-enough"
 
-"$root/live-tron-media-event.sh" ingest_started "$stream_id"
+/bin/sh "$root/live-tron-media-event.sh" ingest_started "$stream_id"
 grep -F -- 'X-Live-Tron-Media-Secret: test-only-secret-that-is-long-enough' "$CAPTURE" >/dev/null
 if grep -F -- 'test-only-secret-that-is-long-enough' "$ARGS_CAPTURE" >/dev/null; then
   echo "shared secret leaked into curl arguments" >&2
@@ -34,15 +34,15 @@ grep -F -- "\"stream_id\":\"$stream_id\"" "$CAPTURE" >/dev/null
 grep -F -- '"event_type":"ingest_started"' "$CAPTURE" >/dev/null
 grep -F -- 'http://live-tron-api:8080/internal/v1/media/events' "$CAPTURE" >/dev/null
 
-"$root/live-tron-media-event.sh" ingest_ended "$stream_id"
+/bin/sh "$root/live-tron-media-event.sh" ingest_ended "$stream_id"
 grep -F -- '"event_type":"ingest_ended"' "$CAPTURE" >/dev/null
 
-if "$root/live-tron-media-event.sh" unsupported "$stream_id" >/dev/null 2>&1; then
+if /bin/sh "$root/live-tron-media-event.sh" unsupported "$stream_id" >/dev/null 2>&1; then
   echo "unsupported event type was accepted" >&2
   exit 1
 fi
 
-if "$root/live-tron-media-event.sh" ingest_started "not-a-uuid" >/dev/null 2>&1; then
+if /bin/sh "$root/live-tron-media-event.sh" ingest_started "not-a-uuid" >/dev/null 2>&1; then
   echo "invalid stream path was accepted" >&2
   exit 1
 fi
