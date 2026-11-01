@@ -95,6 +95,15 @@ export default function LiveBroadcastPanel({
     }
   }
 
+  const cancelStartup = async () => {
+    requestRef.current?.abort()
+    requestRef.current = null
+    await deleteSession()
+    stopLocalMedia()
+    setStatus('idle')
+    setError('')
+  }
+
   const stopBroadcast = async (notify = true) => {
     setStatus('stopping')
     await deleteSession()
@@ -122,6 +131,10 @@ export default function LiveBroadcastPanel({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
       })
+      if (controller.signal.aborted) {
+        localStream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = localStream
       if (previewRef.current) previewRef.current.srcObject = localStream
 
@@ -235,9 +248,11 @@ export default function LiveBroadcastPanel({
           </button>
           {isLive ? (
             <button type="button" className="broadcast-stop" onClick={() => void stopBroadcast()}>End broadcast</button>
+          ) : isConnecting ? (
+            <button type="button" className="broadcast-stop" onClick={() => void cancelStartup()}>Cancel start</button>
           ) : (
-            <button type="button" className="broadcast-start" onClick={() => void startBroadcast()} disabled={isConnecting || status === 'stopping'}>
-              {status === 'requesting' ? 'Requesting devices…' : isConnecting ? 'Connecting…' : status === 'stopping' ? 'Stopping…' : status === 'error' ? 'Retry broadcast' : 'Start broadcast'}
+            <button type="button" className="broadcast-start" onClick={() => void startBroadcast()} disabled={status === 'stopping'}>
+              {status === 'stopping' ? 'Stopping…' : status === 'error' ? 'Retry broadcast' : 'Start broadcast'}
             </button>
           )}
         </div>
