@@ -22,7 +22,15 @@ esac
 event_id="$(cat /proc/sys/kernel/random/uuid)"
 payload="$(printf '{"event_id":"%s","stream_id":"%s","event_type":"%s"}' "$event_id" "$stream_id" "$event_type")"
 
-exec curl \
+# Do not place the shared secret in curl's argv, where same-container users
+# could read it through process listings. curl reads the header from this
+# private temporary file instead.
+umask 077
+header_file="$(mktemp)"
+trap 'rm -f "$header_file"' EXIT HUP INT TERM
+printf 'X-Live-Tron-Media-Secret: %s\n' "$LIVE_TRON_MEDIA_EVENT_SECRET" > "$header_file"
+
+curl \
   --fail \
   --silent \
   --show-error \
@@ -33,6 +41,6 @@ exec curl \
   --retry-delay 1 \
   --request POST \
   --header 'Content-Type: application/json' \
-  --header "X-Live-Tron-Media-Secret: $LIVE_TRON_MEDIA_EVENT_SECRET" \
+  --header "@$header_file" \
   --data "$payload" \
   "$LIVE_TRON_MEDIA_EVENT_URL"
