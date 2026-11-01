@@ -94,6 +94,8 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     let active = true
     setStreamsLoading(true)
     setStreamsLoadFailed(false)
+    setError('')
+    setCreatorStreams([])
     fetchCreatorStreams(channel.slug).then((items) => {
       if (active) setCreatorStreams(items)
     }).catch((cause: unknown) => {
@@ -214,6 +216,7 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
       onUserChange(null)
       setChannel(null)
       setCreated(null)
+      setCreatorStreams([])
       setBusy(false)
     }
   }
