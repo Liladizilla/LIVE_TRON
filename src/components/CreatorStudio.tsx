@@ -119,7 +119,7 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
     }
   }
 
-  const submitStream = async (event: React.FormEvent) => {
+  const submitStream = async (event: FormEvent) => {
     event.preventDefault()
     if (!channel) return
     setBusy(true)
