@@ -143,6 +143,26 @@ async fn persisted_chat_enforces_access_validation_and_rate_limits() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
+    let ticket_uri = format!("/v1/streams/{stream_id}/chat-ticket");
+    let (status, _) = request(&app, Method::POST, &ticket_uri, None, None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, ticket) =
+        request(&app, Method::POST, &ticket_uri, Some(&owner), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{ticket}");
+    assert_eq!(ticket["ticket"].as_str().unwrap().len(), 64);
+    assert_eq!(ticket["expires_in"], 60);
+
+    let (status, origin_error) = request(
+        &app,
+        Method::GET,
+        &format!("/v1/streams/{stream_id}/chat-socket"),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{origin_error}");
+
     for index in 0..5 {
         let (status, message) = request(
             &app,
