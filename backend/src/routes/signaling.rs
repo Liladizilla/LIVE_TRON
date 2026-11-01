@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::time::{Duration, Instant};
+use std::{collections::HashMap, time::{Duration, Instant}};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -339,11 +339,7 @@ pub async fn connect(
     }
     // A newly connected peer must receive the existing room roster. Existing
     // peers will receive this participant through the normal peer_joined event.
-    let existing_peers = room
-        .participants
-        .iter()
-        .map(|(id, is_publisher)| (*id, *is_publisher))
-        .collect::<Vec<_>>();
+    let existing_peers = peer_roster(&room.participants, role);
     let receiver = room.sender.subscribe();
     room.participants
         .insert(participant_id, role.is_publisher());
@@ -538,6 +534,18 @@ fn create_turn_credential(
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
 }
 
+fn peer_roster(
+    participants: &HashMap<Uuid, bool>,
+    joining_role: PeerRole,
+) -> Vec<(Uuid, bool)> {
+    participants
+        .iter()
+        .filter_map(|(id, is_publisher)| {
+            (*is_publisher != joining_role.is_publisher()).then_some((*id, *is_publisher))
+        })
+        .collect()
+}
+
 fn peer_joined_event(participant_id: Uuid, role: PeerRole) -> Value {
     json!({
         "type": "peer_joined",
@@ -649,6 +657,26 @@ mod tests {
         assert_eq!(publisher["role"], "publisher");
         assert_eq!(viewer["from"], viewer_id.to_string());
         assert_eq!(viewer["role"], "viewer");
+    }
+
+    #[test]
+    fn peer_roster_only_includes_the_opposite_signaling_role() {
+        use std::collections::HashMap;
+
+        let publisher_id = Uuid::new_v4();
+        let viewer_one_id = Uuid::new_v4();
+        let viewer_two_id = Uuid::new_v4();
+        let mut participants = HashMap::new();
+        participants.insert(publisher_id, true);
+        participants.insert(viewer_one_id, false);
+        participants.insert(viewer_two_id, false);
+
+        let publisher_roster = super::peer_roster(&participants, PeerRole::Publisher);
+        let viewer_roster = super::peer_roster(&participants, PeerRole::Viewer);
+
+        assert_eq!(publisher_roster.len(), 2);
+        assert!(publisher_roster.iter().all(|(_, is_publisher)| !is_publisher));
+        assert_eq!(viewer_roster, vec![(publisher_id, true)]);
     }
 
     #[test]
