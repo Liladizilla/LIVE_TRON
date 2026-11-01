@@ -166,7 +166,8 @@ mod tests {
     #[tokio::test]
     async fn creator_channel_listing_requires_authentication() {
         let app = build_app(
-            AppState::default().with_jwt_secret(Some("test-jwt-secret-at-least-32-bytes-long".to_owned())),
+            AppState::default()
+                .with_jwt_secret(Some("test-jwt-secret-at-least-32-bytes-long".to_owned())),
             &[],
         );
         let response = app
