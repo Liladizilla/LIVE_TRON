@@ -151,6 +151,64 @@ async fn persisted_chat_enforces_access_validation_and_rate_limits() {
     assert_eq!(ticket["ticket"].as_str().unwrap().len(), 64);
     assert_eq!(ticket["expires_in"], 60);
 
+    let viewer = register(&app, format!("viewer-{suffix}@example.test")).await;
+    let (status, viewer_profile) =
+        request(&app, Method::GET, "/v1/me", Some(&viewer), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{viewer_profile}");
+    let viewer_id = viewer_profile["id"].as_str().unwrap();
+    let restriction_uri = format!("/v1/streams/{stream_id}/chat-restrictions/{viewer_id}");
+    let (status, _) = request(
+        &app,
+        Method::PUT,
+        &restriction_uri,
+        Some(&owner),
+        None,
+        Some(json!({"kind": "mute", "duration_seconds": 600, "reason": "test"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, muted) = request(
+        &app,
+        Method::POST,
+        &chat_uri,
+        Some(&viewer),
+        None,
+        Some(json!({"body": "I am muted"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{muted}");
+    assert_eq!(muted["error"], "chat_restricted");
+
+    let (status, _) = request(
+        &app,
+        Method::DELETE,
+        &restriction_uri,
+        Some(&owner),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, viewer_message) = request(
+        &app,
+        Method::POST,
+        &chat_uri,
+        Some(&viewer),
+        None,
+        Some(json!({"body": "restriction removed"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{viewer_message}");
+
+    let message_uri = format!(
+        "/v1/streams/{stream_id}/chat-messages/{}",
+        viewer_message["id"].as_str().unwrap()
+    );
+    let (status, _) = request(&app, Method::DELETE, &message_uri, Some(&owner), None, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
     for index in 0..5 {
         let (status, message) = request(
             &app,
