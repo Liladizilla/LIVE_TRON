@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type PlayerStatus = 'idle' | 'connecting' | 'live' | 'error'
 
