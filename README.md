@@ -43,6 +43,8 @@ To use real API-backed discovery, copy the root `.env.example` to `.env.local` a
 
 The browser API client keeps access and refresh tokens in memory only. Reloading the page signs the browser out. Persistent sessions should use a same-origin backend-for-frontend with Secure, HttpOnly, SameSite cookies before production deployment.
 
+Creator Studio is available from the Go live action and account control. It supports registration/sign-in, lists channels owned by the signed-in account, creates a channel when needed, creates a stream record, and displays the one-time publishing key returned by the API. The key remains in component memory and is not recoverable after the Studio session is discarded. The browser WHIP publisher can use that key to attempt camera/microphone ingest when `VITE_MEDIAMTX_WHIP_BASE_URL` points to a configured MediaMTX server. A stream record remains `created` until MediaMTX reports an ingest lifecycle event; creating it does not make it live.
+
 ## Run the API
 
 Requirements: Rust stable and PostgreSQL 16+.
