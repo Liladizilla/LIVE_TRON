@@ -122,6 +122,7 @@ function App() {
   const featured = catalogue.find((stream) => stream.featured) ?? catalogue[0]
   const visibleStreams = filteredStreams.filter((stream) => stream.id !== featured?.id)
   const isFollowing = (stream: Stream) => following.includes(stream.id)
+  const canUseChat = !!selectedStream && isApiConfigured() && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id)
 
   const toggleFollow = (stream: Stream) => {
     setFollowing((current) => current.includes(stream.id) ? current.filter((id) => id !== stream.id) : [...current, stream.id])
@@ -232,7 +233,7 @@ function App() {
                 <div className="chat-header"><div><MessageCircle size={17} /><strong>Live chat</strong></div><span>COMMUNITY</span></div>
                 <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
                 <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span></div>)}</div>
-                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} placeholder="Sign in to join the conversation…" aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!chatMessage.trim() || chatSending}><Send size={16} /></button></form>
+                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} disabled={!canUseChat} placeholder={canUseChat ? "Sign in to join the conversation…" : "Chat unavailable in preview mode"} aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!canUseChat || !chatMessage.trim() || chatSending}><Send size={16} /></button></form>
                 <div className="chat-footer" role="status">{chatStatus || 'Messages refresh automatically · 500 character limit'}</div>
               </aside>
             </div>
