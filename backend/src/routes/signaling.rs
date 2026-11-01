@@ -1,0 +1,370 @@
+use super::auth::{authenticated_user, ApiError};
+use crate::state::{AppState, SignalRoom};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
+    http::{header::ORIGIN, HeaderMap, StatusCode},
+    response::Response,
+    Json,
+};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::Utc;
+use futures_util::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha1::Sha1;
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use uuid::Uuid;
+
+const MAX_SIGNAL_BYTES: usize = 16 * 1024;
+const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
+type HmacSha1 = Hmac<Sha1>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PeerRole {
+    Publisher,
+    Viewer,
+}
+impl PeerRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Publisher => "publisher",
+            Self::Viewer => "viewer",
+        }
+    }
+    fn is_publisher(self) -> bool {
+        self == Self::Publisher
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClientSignal {
+    #[serde(rename = "type")]
+    kind: String,
+    to: Uuid,
+    payload: Value,
+}
+
+#[derive(Serialize)]
+struct IceServer {
+    urls: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential: Option<String>,
+}
+#[derive(Serialize)]
+struct IceConfig {
+    ice_servers: Vec<IceServer>,
+    expires_in: u64,
+}
+
+pub async fn ice_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<IceConfig>, ApiError> {
+    let user_id = authenticated_user(&headers, &state)?;
+    let mut ice_servers = Vec::new();
+    if !state.ice.stun_urls.is_empty() {
+        ice_servers.push(IceServer {
+            urls: state.ice.stun_urls.clone(),
+            username: None,
+            credential: None,
+        });
+    }
+    if let (Some(secret), false) = (
+        state.ice.turn_shared_secret.as_deref(),
+        state.ice.turn_urls.is_empty(),
+    ) {
+        let expires_at = Utc::now().timestamp() + TURN_CREDENTIAL_TTL_SECONDS;
+        let username = format!("{expires_at}:{user_id}");
+        let mut mac = HmacSha1::new_from_slice(secret.as_bytes())
+            .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "turn_credentials_failed"))?;
+        mac.update(username.as_bytes());
+        let credential = STANDARD.encode(mac.finalize().into_bytes());
+        ice_servers.push(IceServer {
+            urls: state.ice.turn_urls.clone(),
+            username: Some(username),
+            credential: Some(credential),
+        });
+    }
+    Ok(Json(IceConfig {
+        ice_servers,
+        expires_in: TURN_CREDENTIAL_TTL_SECONDS as u64,
+    }))
+}
+
+fn credential_hash(key: &str) -> String {
+    hex::encode(Sha256::digest(key.as_bytes()))
+}
+
+fn valid_publish_key(key: &str) -> bool {
+    key.len() == 71
+        && key.starts_with("lt_pub_")
+        && key[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+async fn stream_access(
+    db: &PgPool,
+    stream_id: Uuid,
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<PeerRole, ApiError> {
+    let row = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT c.owner_user_id, s.status, s.visibility FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1",
+    )
+    .bind(stream_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?
+    .ok_or(ApiError(StatusCode::NOT_FOUND, "stream_not_found"))?;
+
+    let authorization = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+
+    if let Some(key) = authorization.strip_prefix("Publish ") {
+        if !valid_publish_key(key) || !matches!(row.1.as_str(), "created" | "live") {
+            return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_publishing_key"));
+        }
+        let valid = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM stream_publish_credentials WHERE stream_id = $1 AND key_hash = $2 AND revoked_at IS NULL)",
+        )
+        .bind(stream_id)
+        .bind(credential_hash(key))
+        .fetch_one(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?;
+        if !valid {
+            return Err(ApiError(StatusCode::UNAUTHORIZED, "invalid_publishing_key"));
+        }
+        return Ok(PeerRole::Publisher);
+    }
+
+    let viewer = authenticated_user(headers, state)?;
+    if row.2 == "private" && viewer != row.0 {
+        return Err(ApiError(StatusCode::NOT_FOUND, "stream_not_found"));
+    }
+    if row.1 != "live" {
+        return Err(ApiError(StatusCode::CONFLICT, "stream_not_live"));
+    }
+    Ok(PeerRole::Viewer)
+}
+
+pub async fn connect(
+    State(state): State<AppState>,
+    Path(stream_id): Path<Uuid>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    if let Some(origin) = headers.get(ORIGIN).and_then(|value| value.to_str().ok()) {
+        if !state.allowed_origins.iter().any(|allowed| allowed == origin) {
+            return Err(ApiError(StatusCode::FORBIDDEN, "websocket_origin_not_allowed"));
+        }
+    }
+    let db = state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))?;
+    let role = stream_access(db, stream_id, &headers, &state).await?;
+    let participant_id = Uuid::new_v4();
+    let mut rooms = state.signal_rooms.lock().await;
+    let room = rooms.entry(stream_id).or_insert_with(|| {
+        let (sender, _) = broadcast::channel(64);
+        SignalRoom {
+            sender,
+            publisher: None,
+            participants: Default::default(),
+        }
+    });
+    if role.is_publisher() && room.publisher.is_some() {
+        return Err(ApiError(StatusCode::CONFLICT, "publisher_already_connected"));
+    }
+    let receiver = room.sender.subscribe();
+    room.participants
+        .insert(participant_id, role.is_publisher());
+    if role.is_publisher() {
+        room.publisher = Some(participant_id);
+    }
+    let sender = room.sender.clone();
+    drop(rooms);
+
+    let state_for_socket = state.clone();
+    Ok(ws
+        .max_message_size(MAX_SIGNAL_BYTES)
+        .max_frame_size(MAX_SIGNAL_BYTES)
+        .on_upgrade(move |socket| {
+            handle_socket(
+                socket,
+                state_for_socket,
+                stream_id,
+                participant_id,
+                role,
+                sender,
+                receiver,
+            )
+        }))
+}
+
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    stream_id: Uuid,
+    participant_id: Uuid,
+    role: PeerRole,
+    room_sender: broadcast::Sender<String>,
+    mut room_receiver: broadcast::Receiver<String>,
+) {
+    let (mut outgoing, mut incoming) = socket.split();
+    let hello = json!({
+        "type": "ready",
+        "participant_id": participant_id,
+        "stream_id": stream_id,
+        "role": role.as_str(),
+        "protocol": "live-tron.signal.v1",
+        "media_transport": "not_connected"
+    });
+    if outgoing.send(Message::Text(hello.to_string().into())).await.is_err() {
+        cleanup_participant(&state, stream_id, participant_id, role).await;
+        return;
+    }
+    let joined = json!({
+        "type": "peer_joined",
+        "from": participant_id,
+        "role": role.as_str()
+    });
+    let _ = room_sender.send(joined.to_string());
+
+    loop {
+        tokio::select! {
+            incoming_message = incoming.next() => {
+                let Some(Ok(message)) = incoming_message else { break };
+                match message {
+                    Message::Text(text) => {
+                        if text.len() > MAX_SIGNAL_BYTES {
+                            let _ = outgoing.send(Message::Close(None)).await;
+                            break;
+                        }
+                        let Ok(signal) = serde_json::from_str::<ClientSignal>(&text) else {
+                            let _ = outgoing.send(Message::Text(json!({"type":"error","error":"invalid_signal_message"}).to_string().into())).await;
+                            continue;
+                        };
+                        if !valid_signal_kind(&signal.kind, role)
+                            || serde_json::to_vec(&signal.payload).map_or(true, |bytes| bytes.len() > MAX_SIGNAL_BYTES / 2)
+                        {
+                            let _ = outgoing.send(Message::Text(json!({"type":"error","error":"signal_type_or_payload_rejected"}).to_string().into())).await;
+                            continue;
+                        }
+                        let target_is_valid = {
+                            let rooms = state.signal_rooms.lock().await;
+                            rooms.get(&stream_id).and_then(|room| room.participants.get(&signal.to))
+                                .is_some_and(|target_is_publisher| *target_is_publisher != role.is_publisher())
+                        };
+                        if !target_is_valid || signal.to == participant_id {
+                            let _ = outgoing.send(Message::Text(json!({"type":"error","error":"invalid_signal_recipient"}).to_string().into())).await;
+                            continue;
+                        }
+                        let envelope = json!({
+                            "type": signal.kind,
+                            "from": participant_id,
+                            "to": signal.to,
+                            "role": role.as_str(),
+                            "payload": signal.payload
+                        });
+                        let _ = room_sender.send(envelope.to_string());
+                    }
+                    Message::Ping(payload) => {
+                        if outgoing.send(Message::Pong(payload)).await.is_err() { break; }
+                    }
+                    Message::Close(_) => break,
+                    Message::Binary(_) | Message::Pong(_) => {}
+                }
+            }
+            outbound = room_receiver.recv() => {
+                match outbound {
+                    Ok(payload) => {
+                        let should_deliver = serde_json::from_str::<Value>(&payload)
+                            .ok()
+                            .and_then(|value| value.get("to").and_then(Value::as_str).map(str::to_owned))
+                            .is_some_and(|target| target == participant_id.to_string());
+                        let is_own_join = serde_json::from_str::<Value>(&payload)
+                            .ok()
+                            .and_then(|value| value.get("from").and_then(Value::as_str).map(str::to_owned))
+                            .is_some_and(|sender| sender == participant_id.to_string());
+                        if should_deliver && !is_own_join
+                            && outgoing.send(Message::Text(payload.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+    let left = json!({
+        "type": "peer_left",
+        "from": participant_id,
+        "role": role.as_str()
+    });
+    let _ = room_sender.send(left.to_string());
+    cleanup_participant(&state, stream_id, participant_id, role).await;
+}
+
+fn valid_signal_kind(kind: &str, role: PeerRole) -> bool {
+    match kind {
+        "offer" | "renegotiate" => role == PeerRole::Publisher,
+        "answer" => role == PeerRole::Viewer,
+        "ice_candidate" => true,
+        _ => false,
+    }
+}
+
+async fn cleanup_participant(
+    state: &AppState,
+    stream_id: Uuid,
+    participant_id: Uuid,
+    role: PeerRole,
+) {
+    let mut rooms = state.signal_rooms.lock().await;
+    if let Some(room) = rooms.get_mut(&stream_id) {
+        room.participants.remove(&participant_id);
+        if role.is_publisher() && room.publisher == Some(participant_id) {
+            room.publisher = None;
+        }
+        if room.participants.is_empty() {
+            rooms.remove(&stream_id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{valid_publish_key, valid_signal_kind, PeerRole};
+
+    #[test]
+    fn signaling_roles_cannot_invert_offer_answer_flow() {
+        assert!(valid_signal_kind("offer", PeerRole::Publisher));
+        assert!(valid_signal_kind("renegotiate", PeerRole::Publisher));
+        assert!(valid_signal_kind("answer", PeerRole::Viewer));
+        assert!(valid_signal_kind("ice_candidate", PeerRole::Viewer));
+        assert!(!valid_signal_kind("offer", PeerRole::Viewer));
+        assert!(!valid_signal_kind("answer", PeerRole::Publisher));
+        assert!(!valid_signal_kind("arbitrary", PeerRole::Publisher));
+    }
+
+    #[test]
+    fn publishing_key_format_is_strict() {
+        assert!(valid_publish_key(&format!("lt_pub_{}", "a".repeat(64))));
+        assert!(!valid_publish_key("lt_pub_short"));
+        assert!(!valid_publish_key(&format!("lt_pub_{}", "g".repeat(64))));
+    }
+}
