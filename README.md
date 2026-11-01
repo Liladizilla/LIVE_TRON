@@ -72,6 +72,7 @@ The API and migration runner load `backend/.env` automatically when started from
 | POST | `/v1/auth/refresh` | Public | Rotate refresh token and issue access token |
 | POST | `/v1/auth/logout` | Public | Revoke supplied refresh token |
 | GET | `/v1/me` | Bearer | Read current account |
+| GET | `/v1/me/channels` | Bearer | List channels owned by current account |
 | PATCH | `/v1/me` | Bearer | Update display name |
 | GET | `/v1/channels` | Public | Search and filter channels |
 | POST | `/v1/channels` | Bearer | Create an owned channel |
