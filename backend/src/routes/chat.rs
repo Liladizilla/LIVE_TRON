@@ -396,3 +396,29 @@ pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
         let _ = sender.send(payload);
     }
 }
+
+
+#[cfg(test)]
+mod websocket_origin_tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn chat_websocket_requires_an_exact_allowlisted_origin() {
+        let allowed = vec!["https://live.example.test".to_owned()];
+        let mut headers = HeaderMap::new();
+        assert!(!chat_origin_allowed(&headers, &allowed));
+
+        headers.insert(ORIGIN, HeaderValue::from_static("not-an-origin"));
+        assert!(!chat_origin_allowed(&headers, &allowed));
+
+        headers.insert(ORIGIN, HeaderValue::from_static("https://evil.example.test"));
+        assert!(!chat_origin_allowed(&headers, &allowed));
+
+        headers.insert(
+            ORIGIN,
+            HeaderValue::from_static("https://live.example.test"),
+        );
+        assert!(chat_origin_allowed(&headers, &allowed));
+    }
+}
