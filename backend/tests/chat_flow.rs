@@ -157,6 +157,17 @@ async fn persisted_chat_enforces_access_validation_and_rate_limits() {
     assert_eq!(status, StatusCode::OK, "{viewer_profile}");
     let viewer_id = viewer_profile["id"].as_str().unwrap();
     let restriction_uri = format!("/v1/streams/{stream_id}/chat-restrictions/{viewer_id}");
+    let (status, forbidden) = request(
+        &app,
+        Method::PUT,
+        &restriction_uri,
+        Some(&viewer),
+        None,
+        Some(json!({"kind": "mute", "duration_seconds": 600})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
     let (status, _) = request(
         &app,
         Method::PUT,
