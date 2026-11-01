@@ -1,8 +1,14 @@
 use super::auth::{authenticated_user, ApiError};
 use crate::state::AppState;
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Path, Query, State},
-    http::{header::{ORIGIN, SEC_WEBSOCKET_PROTOCOL}, HeaderMap, StatusCode},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, Query, State,
+    },
+    http::{
+        header::{ORIGIN, SEC_WEBSOCKET_PROTOCOL},
+        HeaderMap, StatusCode,
+    },
     response::Response,
     Json,
 };
@@ -144,7 +150,6 @@ pub async fn send(
     Ok((StatusCode::CREATED, Json(message)))
 }
 
-
 #[derive(Serialize)]
 pub struct ChatTicketResponse {
     ticket: String,
@@ -160,9 +165,8 @@ pub async fn create_ticket(
     let user_id = authenticated_user(&headers, &state)?;
     let db = pool(&state)?;
     ensure_chat_access(db, stream_id, Some(user_id)).await?;
-    let account_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)",
-    )
+    let account_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
     .bind(user_id)
     .fetch_one(db)
     .await
@@ -177,13 +181,19 @@ pub async fn create_ticket(
     let mut tickets = state.chat_tickets.lock().await;
     tickets.retain(|_, value| value.expires_at > Instant::now());
     if tickets.len() >= 10_000 {
-        return Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, "chat_ticket_capacity_reached"));
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "chat_ticket_capacity_reached",
+        ));
     }
-    tickets.insert(ticket.clone(), crate::state::ChatTicket {
-        stream_id,
-        user_id,
-        expires_at: Instant::now() + CHAT_TICKET_TTL,
-    });
+    tickets.insert(
+        ticket.clone(),
+        crate::state::ChatTicket {
+            stream_id,
+            user_id,
+            expires_at: Instant::now() + CHAT_TICKET_TTL,
+        },
+    );
     Ok(Json(ChatTicketResponse {
         ticket,
         expires_in: CHAT_TICKET_TTL.as_secs(),
@@ -192,7 +202,8 @@ pub async fn create_ticket(
 }
 
 fn chat_origin_allowed(headers: &HeaderMap, allowed_origins: &[String]) -> bool {
-    headers.get(ORIGIN)
+    headers
+        .get(ORIGIN)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|origin| allowed_origins.iter().any(|allowed| allowed == origin))
 }
@@ -204,9 +215,13 @@ pub async fn connect(
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     if !chat_origin_allowed(&headers, &state.allowed_origins) {
-        return Err(ApiError(StatusCode::FORBIDDEN, "websocket_origin_not_allowed"));
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "websocket_origin_not_allowed",
+        ));
     }
-    let ticket = headers.get(SEC_WEBSOCKET_PROTOCOL)
+    let ticket = headers
+        .get(SEC_WEBSOCKET_PROTOCOL)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .split(',')
@@ -231,7 +246,10 @@ pub async fn connect(
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_authorization_failed"))?;
     if !authorized {
-        return Err(ApiError(StatusCode::UNAUTHORIZED, "chat_ticket_access_revoked"));
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "chat_ticket_access_revoked",
+        ));
     }
 
     let (sender, receiver) = {
@@ -247,7 +265,8 @@ pub async fn connect(
     };
     let state_for_socket = state.clone();
     let state_for_failure = state.clone();
-    Ok(ws.protocols([CHAT_PROTOCOL])
+    Ok(ws
+        .protocols([CHAT_PROTOCOL])
         .max_message_size(4096)
         .max_frame_size(4096)
         .on_failed_upgrade(move |_| {
@@ -256,7 +275,14 @@ pub async fn connect(
             });
         })
         .on_upgrade(move |socket| {
-            handle_chat_socket(socket, state_for_socket, stream_id, record.user_id, sender, receiver)
+            handle_chat_socket(
+                socket,
+                state_for_socket,
+                stream_id,
+                record.user_id,
+                sender,
+                receiver,
+            )
         }))
 }
 
@@ -276,7 +302,11 @@ async fn handle_chat_socket(
         "protocol": CHAT_PROTOCOL,
         "participants": sender.receiver_count()
     });
-    if outgoing.send(Message::Text(ready.to_string().into())).await.is_err() {
+    if outgoing
+        .send(Message::Text(ready.to_string().into()))
+        .await
+        .is_err()
+    {
         drop(receiver);
         drop(sender);
         cleanup_chat_room(&state, stream_id).await;
@@ -339,7 +369,9 @@ pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
     let Ok(payload) = serde_json::to_string(&serde_json::json!({
         "type": "message",
         "message": message
-    })) else { return; };
+    })) else {
+        return;
+    };
     let rooms = state.chat_rooms.lock().await;
     if let Some(sender) = rooms.get(&message.stream_id) {
         let _ = sender.send(payload);
