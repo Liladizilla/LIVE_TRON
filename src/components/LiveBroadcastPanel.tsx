@@ -211,13 +211,14 @@ export default function LiveBroadcastPanel({
   }
 
   const broadcasting = status === 'live' || status === 'connecting'
+  const isLive = status === 'live'
 
   return (
     <section className="broadcast-panel" aria-label="Live broadcast controls">
       <div className="broadcast-preview">
         <video ref={previewRef} autoPlay muted playsInline aria-label="Local camera preview" />
         {!streamRef.current && <div className="broadcast-preview-empty"><span /> CAMERA PREVIEW</div>}
-        <span className={broadcasting ? 'broadcast-state is-live' : 'broadcast-state'}>{broadcasting ? 'ON AIR' : status === 'connecting' ? 'CONNECTING' : 'STANDBY'}</span>
+        <span className={isLive ? 'broadcast-state is-live' : 'broadcast-state'}>{isLive ? 'ON AIR' : status === 'connecting' ? 'CONNECTING' : 'STANDBY'}</span>
       </div>
       <div className="broadcast-controls">
         <div className="broadcast-heading">
