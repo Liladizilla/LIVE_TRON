@@ -213,7 +213,7 @@ export default function CreatorStudio({ user, onUserChange, onClose, open }: Pro
         </div>}
         {error && channel && created && <p className="studio-error" role="alert">{error}</p>}
       </div>}
-      <footer className="studio-footer">Publishing keys are credentials. Never share them in chat, screenshots, or public repositories.</footer>
+      <footer className="studio-footer">{created ? "Closing Creator Studio stops the browser publisher and releases camera/microphone access. The stream record remains on the server." : "Publishing keys are credentials. Never share them in chat, screenshots, or public repositories."}</footer>
     </section>
   </div>
 }
