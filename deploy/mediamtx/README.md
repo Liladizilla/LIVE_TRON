@@ -8,7 +8,7 @@ MediaMTX v1.21.3 provides `runOnOnline` and `runOnOffline` path hooks. They are 
 
 - `runOnOnline` invokes `live-tron-media-event.sh ingest_started $MTX_PATH`.
 - `runOnOffline` invokes `live-tron-media-event.sh ingest_ended $MTX_PATH`.
-- The script generates one UUID event ID per invocation, builds a JSON payload, and sends it to the existing authenticated `POST /internal/v1/media/events` API route.
+- The script generates one UUID event ID per invocation, builds a JSON payload, stores the shared-secret header in a mode-0600 temporary file (not curl's process arguments), and sends it to the existing authenticated `POST /internal/v1/media/events` API route.
 - Curl retries reuse the same payload and event ID, so the API's idempotency key remains stable during transient failures.
 - The API owns lifecycle transitions. A stream becomes `live` only after MediaMTX reports it online; it becomes `ended` when MediaMTX reports it offline.
 
@@ -17,10 +17,11 @@ MediaMTX v1.21.3 provides `runOnOnline` and `runOnOffline` path hooks. They are 
 The MediaMTX container must provide:
 - `/bin/sh`
 - `curl`
+- `mktemp`
 - `/proc/sys/kernel/random/uuid`
-- The mounted script at `/etc/mediamtx/live-tron-media-event.sh`, executable by the MediaMTX process.
+- The mounted script at `/etc/mediamtx/live-tron-media-event.sh`, readable by the MediaMTX process.
 
-Mount the script read-only and make it executable in the image or host filesystem. The official MediaMTX image contents can vary by packaging; verify these runtime dependencies rather than assuming they exist.
+Mount the script read-only. The configuration invokes it through `/bin/sh`, so the script does not need its executable bit set. The official MediaMTX image contents can vary by packaging; verify these runtime dependencies rather than assuming they exist.
 
 Set these environment variables in the MediaMTX container:
 - `LIVE_TRON_MEDIA_EVENT_SECRET`: same value as API `LIVE_TRON_MEDIA_EVENT_SECRET` (minimum 32 bytes).
