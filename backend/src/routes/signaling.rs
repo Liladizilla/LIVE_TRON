@@ -666,11 +666,14 @@ mod tests {
             let mut rooms = state.signal_rooms.lock().await;
             let mut participants = HashMap::new();
             participants.insert(participant_id, true);
-            rooms.insert(stream_id, SignalRoom {
-                sender,
-                publisher: Some(participant_id),
-                participants,
-            });
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(participant_id),
+                    participants,
+                },
+            );
         }
 
         super::cleanup_participant(
@@ -678,7 +681,8 @@ mod tests {
             stream_id,
             participant_id,
             super::PeerRole::Publisher,
-        ).await;
+        )
+        .await;
 
         let rooms = state.signal_rooms.lock().await;
         assert!(!rooms.contains_key(&stream_id));
@@ -701,11 +705,14 @@ mod tests {
             let mut participants = HashMap::new();
             participants.insert(publisher_id, true);
             participants.insert(viewer_id, false);
-            rooms.insert(stream_id, SignalRoom {
-                sender,
-                publisher: Some(publisher_id),
-                participants,
-            });
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(publisher_id),
+                    participants,
+                },
+            );
         }
 
         super::cleanup_participant(
@@ -713,7 +720,8 @@ mod tests {
             stream_id,
             viewer_id,
             super::PeerRole::Viewer,
-        ).await;
+        )
+        .await;
 
         let rooms = state.signal_rooms.lock().await;
         let room = rooms.get(&stream_id).expect("publisher room must remain");
@@ -739,11 +747,14 @@ mod tests {
             let mut participants = HashMap::new();
             participants.insert(publisher_id, true);
             participants.insert(viewer_id, false);
-            rooms.insert(stream_id, SignalRoom {
-                sender,
-                publisher: Some(publisher_id),
-                participants,
-            });
+            rooms.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: Some(publisher_id),
+                    participants,
+                },
+            );
         }
 
         super::cleanup_participant(
@@ -751,7 +762,8 @@ mod tests {
             stream_id,
             publisher_id,
             super::PeerRole::Publisher,
-        ).await;
+        )
+        .await;
 
         let rooms = state.signal_rooms.lock().await;
         let room = rooms.get(&stream_id).expect("viewer room must remain");
