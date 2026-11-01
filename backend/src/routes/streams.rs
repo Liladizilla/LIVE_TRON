@@ -112,6 +112,24 @@ fn valid_title(title: &str) -> bool {
 
 const STREAM_SELECT: &str = "SELECT s.id, s.channel_id, c.slug AS channel_slug, s.title, s.category, s.status, s.visibility, s.started_at, s.ended_at, s.created_at FROM streams s JOIN channels c ON c.id = s.channel_id";
 
+pub async fn list_for_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<StreamView>>, ApiError> {
+    let owner = authenticated_user(&headers, &state)?;
+    let db = pool(&state)?;
+    let rows = sqlx::query_as::<_, StreamView>(
+        "SELECT s.id, s.channel_id, c.slug AS channel_slug, s.title, s.category, s.status, s.visibility, s.started_at, s.ended_at, s.created_at FROM streams s JOIN channels c ON c.id = s.channel_id WHERE c.slug = $1 AND c.owner_user_id = $2 ORDER BY s.created_at DESC LIMIT 50"
+    )
+    .bind(slug)
+    .bind(owner)
+    .fetch_all(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "stream_discovery_failed"))?;
+    Ok(Json(rows))
+}
+
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,

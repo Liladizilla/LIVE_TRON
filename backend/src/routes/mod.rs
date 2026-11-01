@@ -39,7 +39,10 @@ pub fn router() -> Router<AppState> {
             "/v1/channels/{slug}/follow",
             post(channels::follow).delete(channels::unfollow),
         )
-        .route("/v1/channels/{slug}/streams", post(streams::create))
+        .route(
+            "/v1/channels/{slug}/streams",
+            get(streams::list_for_channel).post(streams::create),
+        )
         .route("/v1/streams", get(streams::discover))
         .route("/v1/media/ice-config", get(signaling::ice_config))
         .route(

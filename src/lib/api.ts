@@ -179,6 +179,10 @@ export async function createChannel(input: {
   })
 }
 
+export async function fetchCreatorStreams(slug: string): Promise<ApiStream[]> {
+  return authenticatedRequest<ApiStream[]>(`/v1/channels/${encodeURIComponent(slug)}/streams`)
+}
+
 export async function createCreatorStream(
   slug: string,
   input: { title: string; category: string; visibility: 'public' | 'unlisted' | 'private' },
