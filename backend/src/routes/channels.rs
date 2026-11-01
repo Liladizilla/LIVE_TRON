@@ -283,6 +283,11 @@ pub async fn my_channels(
     .bind(owner)
     .fetch_all(db)
     .await
-    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "channel_discovery_failed"))?;
+    .map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "channel_discovery_failed",
+        )
+    })?;
     Ok(Json(rows))
 }
