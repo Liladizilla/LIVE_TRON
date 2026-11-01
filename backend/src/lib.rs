@@ -12,7 +12,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub fn build_app(state: AppState, allowed_origins: &[HeaderValue]) -> Router {
     let state =
-        state.with_allowed_origins(allowed_origins.iter().map(ToString::to_string).collect());
+        state.with_allowed_origins(allowed_origins.iter().filter_map(|origin| origin.to_str().ok().map(str::to_owned)).collect());
     let cors = if allowed_origins.is_empty() {
         CorsLayer::new()
     } else {
