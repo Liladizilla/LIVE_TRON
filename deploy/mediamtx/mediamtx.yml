@@ -1,9 +1,9 @@
 # MediaMTX v1.21.3 baseline for LIVE_TRON WebRTC ingest/playback.
-# Keep the API auth callback on a private Docker/VPC network.
+# Keep the API auth callback and lifecycle callback on a private Docker/VPC network.
 logLevel: info
 logDestinations: [stdout]
 authMethod: http
-authHTTPAddress: http://live-tron-api:8080/internal/v1/media/authorize
+authHTTPAddress: http://live-tron-api:8080/internal/v1/media/authorize?secret=REPLACE_WITH_SHARED_SECRET
 authHTTPExclude: []
 rtsp: false
 rtmp: false
@@ -20,6 +20,11 @@ webrtcAdditionalHosts: []
 api: false
 metrics: false
 pprof: false
+pathDefaults:
+  # MediaMTX v1.21.3 uses runOnOnline/runOnOffline for source online transitions.
+  # Mount live-tron-media-event.sh at this path and ensure curl is installed.
+  runOnOnline: /etc/mediamtx/live-tron-media-event.sh ingest_started $MTX_PATH
+  runOnOffline: /etc/mediamtx/live-tron-media-event.sh ingest_ended $MTX_PATH
 paths:
   all_others:
     source: publisher
