@@ -492,7 +492,7 @@ pub async fn set_restriction(
         return Err(ApiError(StatusCode::NOT_FOUND, "chat_user_not_found"));
     }
     sqlx::query(
-        "INSERT INTO chat_restrictions (stream_id, user_id, created_by, kind, reason, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 second')) ON CONFLICT (stream_id, user_id) DO UPDATE SET created_by = EXCLUDED.created_by, kind = EXCLUDED.kind, reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at, created_at = now()",
+        "INSERT INTO chat_restrictions (stream_id, user_id, created_by, kind, reason, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6::double precision * interval '1 second')) ON CONFLICT (stream_id, user_id) DO UPDATE SET created_by = EXCLUDED.created_by, kind = EXCLUDED.kind, reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at, created_at = now()",
     )
     .bind(stream_id)
     .bind(user_id)
