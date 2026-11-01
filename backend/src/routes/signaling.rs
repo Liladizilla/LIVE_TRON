@@ -52,7 +52,7 @@ struct ClientSignal {
 }
 
 #[derive(Serialize)]
-struct IceServer {
+pub struct IceServer {
     urls: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     username: Option<String>,
@@ -60,7 +60,7 @@ struct IceServer {
     credential: Option<String>,
 }
 #[derive(Serialize)]
-struct IceConfig {
+pub struct IceConfig {
     ice_servers: Vec<IceServer>,
     expires_in: u64,
 }
