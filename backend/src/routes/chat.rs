@@ -116,6 +116,17 @@ pub async fn send(
         return Err(ApiError(StatusCode::BAD_REQUEST, "chat_message_too_long"));
     }
     ensure_chat_access(db, stream_id, Some(user_id)).await?;
+    let restricted = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM chat_restrictions WHERE stream_id = $1 AND user_id = $2 AND expires_at > now())",
+    )
+    .bind(stream_id)
+    .bind(user_id)
+    .fetch_one(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_restriction_check_failed"))?;
+    if restricted {
+        return Err(ApiError(StatusCode::FORBIDDEN, "chat_restricted"));
+    }
 
     let mut tx = db
         .begin()
@@ -422,5 +433,127 @@ mod websocket_origin_tests {
             HeaderValue::from_static("https://live.example.test"),
         );
         assert!(chat_origin_allowed(&headers, &allowed));
+    }
+}
+
+
+#[derive(Deserialize)]
+pub struct SetChatRestriction {
+    kind: String,
+    duration_seconds: i64,
+    reason: Option<String>,
+}
+
+async fn ensure_stream_owner(
+    db: &PgPool,
+    stream_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), ApiError> {
+    let is_owner = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM streams s JOIN channels c ON c.id = s.channel_id WHERE s.id = $1 AND s.status = 'live' AND c.owner_user_id = $2)",
+    )
+    .bind(stream_id)
+    .bind(user_id)
+    .fetch_one(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_check_failed"))?;
+    if !is_owner {
+        return Err(ApiError(StatusCode::FORBIDDEN, "chat_moderation_forbidden"));
+    }
+    Ok(())
+}
+
+pub async fn set_restriction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((stream_id, user_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<SetChatRestriction>,
+) -> Result<StatusCode, ApiError> {
+    let actor_id = authenticated_user(&headers, &state)?;
+    let db = pool(&state)?;
+    ensure_stream_owner(db, stream_id, actor_id).await?;
+    if !matches!(input.kind.as_str(), "mute" | "ban")
+        || !(1..=86_400).contains(&input.duration_seconds)
+    {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "invalid_chat_restriction"));
+    }
+    let reason = input.reason.map(|value| value.trim().to_owned());
+    if reason.as_ref().is_some_and(|value| value.chars().count() > 240) {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "chat_restriction_reason_too_long"));
+    }
+    let target_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)",
+    )
+    .bind(user_id)
+    .fetch_one(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_failed"))?;
+    if !target_exists {
+        return Err(ApiError(StatusCode::NOT_FOUND, "chat_user_not_found"));
+    }
+    sqlx::query(
+        "INSERT INTO chat_restrictions (stream_id, user_id, created_by, kind, reason, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6 * interval '1 second')) ON CONFLICT (stream_id, user_id) DO UPDATE SET created_by = EXCLUDED.created_by, kind = EXCLUDED.kind, reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at, created_at = now()",
+    )
+    .bind(stream_id)
+    .bind(user_id)
+    .bind(actor_id)
+    .bind(input.kind)
+    .bind(reason)
+    .bind(input.duration_seconds)
+    .execute(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_failed"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn remove_restriction(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((stream_id, user_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    let actor_id = authenticated_user(&headers, &state)?;
+    let db = pool(&state)?;
+    ensure_stream_owner(db, stream_id, actor_id).await?;
+    sqlx::query("DELETE FROM chat_restrictions WHERE stream_id = $1 AND user_id = $2")
+        .bind(stream_id)
+        .bind(user_id)
+        .execute(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_moderation_failed"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn delete_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((stream_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    let actor_id = authenticated_user(&headers, &state)?;
+    let db = pool(&state)?;
+    ensure_stream_owner(db, stream_id, actor_id).await?;
+    let deleted = sqlx::query_scalar::<_, Uuid>(
+        "DELETE FROM chat_messages m USING streams s, channels c WHERE m.id = $1 AND m.stream_id = $2 AND s.id = m.stream_id AND c.id = s.channel_id AND c.owner_user_id = $3 RETURNING m.id",
+    )
+    .bind(message_id)
+    .bind(stream_id)
+    .bind(actor_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_message_delete_failed"))?;
+    let Some(deleted_id) = deleted else {
+        return Err(ApiError(StatusCode::NOT_FOUND, "chat_message_not_found"));
+    };
+    publish_message_deleted(&state, stream_id, deleted_id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn publish_message_deleted(state: &AppState, stream_id: Uuid, message_id: Uuid) {
+    let payload = serde_json::json!({
+        "type": "message_deleted",
+        "message_id": message_id
+    }).to_string();
+    let rooms = state.chat_rooms.lock().await;
+    if let Some(sender) = rooms.get(&stream_id) {
+        let _ = sender.send(payload);
     }
 }
