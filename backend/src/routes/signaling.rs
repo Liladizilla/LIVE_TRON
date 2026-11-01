@@ -22,7 +22,10 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::{collections::HashMap, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -675,7 +678,7 @@ mod tests {
         let viewer_roster = super::peer_roster(&participants, PeerRole::Viewer);
 
         assert_eq!(publisher_roster.len(), 2);
-        assert!(publisher_roster.iter().all(|(_, is_publisher)| !is_publisher));
+        assert!(publisher_roster.iter().all(|(_, is_publisher)| !*is_publisher));
         assert_eq!(viewer_roster, vec![(publisher_id, true)]);
     }
 
