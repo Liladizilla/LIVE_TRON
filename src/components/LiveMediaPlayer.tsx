@@ -58,6 +58,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
   useEffect(() => {
     let disposed = false
     let sessionUrl: string | null = null
+    let sessionAuthorization: string | null = null
     const requestController = new AbortController()
     const peer = new RTCPeerConnection({ iceServers: resolvedIceServers })
     const receivedStream = new MediaStream()
@@ -66,7 +67,13 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
       if (!sessionUrl) return
       const resource = sessionUrl
       sessionUrl = null
-      void fetch(resource, { method: 'DELETE', keepalive: true }).catch(() => undefined)
+      const authorization = sessionAuthorization
+      sessionAuthorization = null
+      void fetch(resource, {
+        method: 'DELETE',
+        headers: authorization ? { Authorization: `Bearer ${authorization}` } : {},
+        keepalive: true,
+      }).catch(() => undefined)
     }
 
     const fail = (message: string) => {
@@ -138,6 +145,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
         try {
           const grant = await fetchMediaReadToken(streamId, requestController.signal)
           mediaToken = grant.token
+          sessionAuthorization = grant.token
         } catch (tokenError) {
           if (requestController.signal.aborted) throw tokenError
           // Public and unlisted streams remain readable without an authenticated token.
