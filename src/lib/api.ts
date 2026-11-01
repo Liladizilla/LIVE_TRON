@@ -303,3 +303,31 @@ export async function sendStreamChatMessage(streamId: string, body: string): Pro
     { method: 'POST', body: JSON.stringify({ body }) },
   )
 }
+
+export async function connectStreamChatSocket(streamId: string): Promise<WebSocket> {
+  const ticket = await authenticatedRequest<{ ticket: string }>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-ticket`,
+    { method: 'POST' },
+  )
+  const socketUrl = new URL(endpoint(`/v1/streams/${encodeURIComponent(streamId)}/chat-socket`))
+  socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+  const socket = new WebSocket(socketUrl, [
+    'live-tron.chat.v1',
+    `live-tron.chat.ticket.${ticket.ticket}`,
+  ])
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      socket.close()
+      reject(new Error('Live chat connection timed out.'))
+    }, 8000)
+    socket.addEventListener('open', () => {
+      window.clearTimeout(timeout)
+      resolve()
+    }, { once: true })
+    socket.addEventListener('error', () => {
+      window.clearTimeout(timeout)
+      reject(new Error('Unable to connect to live chat.'))
+    }, { once: true })
+  })
+  return socket
+}
