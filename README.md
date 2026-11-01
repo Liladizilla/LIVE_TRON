@@ -80,9 +80,9 @@ The API and migration runner load `backend/.env` automatically when started from
 | POST | `/v1/streams/:stream_id/publishing-key/rotate` | Owner bearer | Revoke prior key and issue a replacement |
 | DELETE | `/v1/streams/:stream_id/publishing-key` | Owner bearer | Revoke active publishing key |
 | POST | `/internal/v1/streams/:stream_id/authorize-publish` | Publishing key | Validate an active key for a trusted media gateway |
-| POST | `/internal/v1/media/events` | Internal shared secret | Idempotent ingest-started / ingest-ended callbacks |
+| POST | `/internal/v1/media/events` | Internal shared secret | Idempotent ingest-started / ingest-ended callbacks |\n| GET | `/v1/media/ice-config` | Bearer | STUN list and one-hour coturn REST credentials |\n| GET | `/v1/streams/:stream_id/signal` | Bearer viewer / `Publish` key | Authenticated WebSocket offer/answer/ICE signaling relay |
 
-Set `LIVE_TRON_MEDIA_EVENT_SECRET` to a unique random value of at least 32 bytes before enabling internal media lifecycle callbacks. Keep it private to the API and trusted media gateway; leave it unset until that gateway exists. Publishing keys are returned once and must be stored by the creator securely.
+Set `LIVE_TRON_MEDIA_EVENT_SECRET` to a unique random value of at least 32 bytes before enabling internal media lifecycle callbacks. Keep it private to the API and trusted media gateway; leave it unset until that gateway exists. Publishing keys are returned once and must be stored by the creator securely.\n\nThe signaling endpoint authenticates viewers with a bearer access token and publishers with `Authorization: Publish <publishing_key>`. It relays targeted offer, answer, and ICE-candidate JSON messages between one publisher and connected viewers. Configure `LIVE_TRON_STUN_URLS` (comma-separated) for STUN and configure both `LIVE_TRON_TURN_URLS` and `LIVE_TRON_TURN_SHARED_SECRET` for coturn REST credentials. TURN credentials are generated per account and expire after one hour. The WebSocket room registry is process-local, so this first signaling implementation requires a single API instance; Redis-backed cross-instance signaling is a later step. This is a signaling relay only: it does not receive, mix, forward, or play audio/video.
 
 Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
 
@@ -137,11 +137,11 @@ Migrations do not drop tables or cascade-delete application data.
 - [ ] Rate limiting, abuse protection, audit events, and account lockout policy
 - [x] Stream lifecycle API, owner authorization, visibility, and secure publishing credential issuance/rotation/revocation
 - [x] Internal media lifecycle event authentication and idempotency
-- [ ] WebRTC ingest, SFU routing, and viewer playback
+- [x] Authenticated WebSocket signaling relay and short-lived coturn credential endpoint\n- [ ] WebRTC ingest, SFU routing, and viewer playback
 - [ ] Authenticated realtime chat, moderation, and presence
 - [ ] Interactive polls, reactions, and overlays
 - [ ] Creator analytics, reporting, and production deployment
 
 ## Project status
 
-This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected. Stream status changes to live only after a trusted internal ingest event. The current internal event callback and publishing-key authorization endpoints are integration boundaries, not an SFU. No video is ingested, routed, or played back by this release.
+This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected. Stream status changes to live only after a trusted internal ingest event. The current internal event callback, publishing-key authorization endpoint, and WebSocket signaling relay are integration boundaries, not an SFU. Signaling rooms are in-process and single-instance only. No video is ingested, routed, or played back by this release.
