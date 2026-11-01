@@ -38,10 +38,7 @@ fn valid_publish_key(key: &str) -> bool {
         && key[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-async fn authorize(
-    db: &PgPool,
-    input: &MediaAuthRequest,
-) -> Result<bool, sqlx::Error> {
+async fn authorize(db: &PgPool, input: &MediaAuthRequest) -> Result<bool, sqlx::Error> {
     let Some(stream_id) = parse_stream_path(&input.path) else {
         return Ok(false);
     };
