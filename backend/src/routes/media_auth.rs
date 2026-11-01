@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     Json,
 };
@@ -90,12 +90,34 @@ async fn authorize(
     }
 }
 
-/// MediaMTX authHTTP callback. Keep this route on a private service network:
-/// publishing authorization uses the one-time publishing key as MediaMTX's token.
+#[derive(Deserialize)]
+pub struct MediaAuthQuery {
+    secret: String,
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (a, b)| difference | (*a ^ *b))
+        == 0
+}
+
+/// MediaMTX authHTTP callback. The shared secret is supplied as a query parameter
+/// because MediaMTX's HTTP-auth contract does not support custom request headers.
 pub async fn authorize_media(
     State(state): State<AppState>,
+    Query(query): Query<MediaAuthQuery>,
     Json(input): Json<MediaAuthRequest>,
 ) -> StatusCode {
+    let Some(secret) = state.mediamtx_auth_secret.as_deref() else {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    };
+    if !constant_time_equal(secret.as_bytes(), query.secret.as_bytes()) {
+        return StatusCode::UNAUTHORIZED;
+    }
     let Some(db) = state.db.as_ref() else {
         return StatusCode::SERVICE_UNAVAILABLE;
     };
@@ -112,8 +134,15 @@ pub async fn authorize_media(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_stream_path, valid_publish_key};
+    use super::{constant_time_equal, parse_stream_path, valid_publish_key};
     use uuid::Uuid;
+
+    #[test]
+    fn media_callback_secret_comparison_is_constant_time_and_length_sensitive() {
+        assert!(constant_time_equal(b"same-secret", b"same-secret"));
+        assert!(!constant_time_equal(b"same-secret", b"wrong-secret"));
+        assert!(!constant_time_equal(b"short", b"longer"));
+    }
 
     #[test]
     fn media_paths_require_canonical_stream_uuids() {
