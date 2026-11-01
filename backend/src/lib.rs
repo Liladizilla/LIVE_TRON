@@ -108,6 +108,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mediamtx_auth_callback_fails_closed_without_configured_secret() {
+        let app = build_app(AppState::default(), &[]);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/v1/media/authorize?secret=anything")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"action":"publish","path":"00000000-0000-4000-8000-000000000001","token":"lt_pub_invalid"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
     async fn oversized_json_requests_are_rejected() {
         let app = build_app(AppState::default(), &[]);
         let payload = format!(r#"{{"email":"{}"}}"#, "a".repeat(65 * 1024));
