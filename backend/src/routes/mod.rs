@@ -2,6 +2,7 @@ pub mod auth;
 pub mod channels;
 mod health;
 mod meta;
+pub mod signaling;
 pub mod streams;
 
 use crate::state::AppState;
@@ -34,6 +35,12 @@ pub fn router() -> Router<AppState> {
         )
         .route("/v1/channels/{slug}/streams", post(streams::create))
         .route("/v1/streams", get(streams::discover))
+        .route("/v1/media/ice-config", get(signaling::ice_config))
+        .route(
+            "/v1/streams/{stream_id}/signal-ticket",
+            post(signaling::create_ticket),
+        )
+        .route("/v1/streams/{stream_id}/signal", get(signaling::connect))
         .route(
             "/internal/v1/streams/{stream_id}/authorize-publish",
             post(streams::authorize_publish),

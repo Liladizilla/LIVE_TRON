@@ -40,7 +40,12 @@ async fn main() -> anyhow::Result<()> {
     let app = build_app(
         AppState::new(db)
             .with_jwt_secret(settings.jwt_secret)
-            .with_media_event_secret(settings.media_event_secret),
+            .with_media_event_secret(settings.media_event_secret)
+            .with_ice_settings(
+                settings.stun_urls,
+                settings.turn_urls,
+                settings.turn_shared_secret,
+            ),
         &settings.cors_origins,
     );
     let listener = TcpListener::bind(settings.bind_addr)
