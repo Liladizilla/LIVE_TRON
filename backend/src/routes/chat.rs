@@ -273,13 +273,19 @@ async fn handle_chat_socket(
         "type": "ready",
         "stream_id": stream_id,
         "user_id": user_id,
-        "protocol": CHAT_PROTOCOL
+        "protocol": CHAT_PROTOCOL,
+        "participants": sender.receiver_count()
     });
     if outgoing.send(Message::Text(ready.to_string().into())).await.is_err() {
         drop(sender);
         cleanup_chat_room(&state, stream_id).await;
         return;
     }
+    let joined = serde_json::json!({
+        "type": "presence",
+        "participants": sender.receiver_count()
+    });
+    let _ = sender.send(joined.to_string());
     loop {
         tokio::select! {
             incoming_message = incoming.next() => {
@@ -307,14 +313,24 @@ async fn handle_chat_socket(
             }
         }
     }
+    drop(receiver);
     drop(sender);
     cleanup_chat_room(&state, stream_id).await;
 }
 
 async fn cleanup_chat_room(state: &AppState, stream_id: Uuid) {
     let mut rooms = state.chat_rooms.lock().await;
-    if rooms.get(&stream_id).is_some_and(|sender| sender.receiver_count() == 0) {
-        rooms.remove(&stream_id);
+    if let Some(sender) = rooms.get(&stream_id) {
+        let participants = sender.receiver_count();
+        if participants == 0 {
+            rooms.remove(&stream_id);
+        } else {
+            let event = serde_json::json!({
+                "type": "presence",
+                "participants": participants
+            });
+            let _ = sender.send(event.to_string());
+        }
     }
 }
 
