@@ -270,7 +270,6 @@ mod tests {
     }
 }
 
-
 pub async fn my_channels(
     State(state): State<AppState>,
     headers: HeaderMap,
