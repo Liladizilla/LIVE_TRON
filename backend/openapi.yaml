@@ -272,6 +272,60 @@ paths:
         "101": { description: WebSocket upgrade accepted }
         "401": { description: Missing, expired, or consumed ticket }
         "403": { description: Origin is not allowed }
+  /v1/streams/{stream_id}/chat-restrictions/{user_id}:
+    parameters:
+      - in: path
+        name: stream_id
+        required: true
+        schema: { type: string, format: uuid }
+      - in: path
+        name: user_id
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      security: [{ bearerAuth: [] }]
+      summary: Mute or ban a chat participant
+      description: Stream owner only. Restrictions last from 1 second to 24 hours. A ban blocks chat sending but does not block stream playback.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, duration_seconds]
+              properties:
+                kind: { type: string, enum: [mute, ban] }
+                duration_seconds: { type: integer, minimum: 1, maximum: 86400 }
+                reason: { type: string, maxLength: 240 }
+      responses:
+        "204": { description: Restriction applied }
+        "400": { description: Invalid restriction }
+        "403": { description: Stream owner permission required }
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Remove a chat restriction
+      description: Stream owner only.
+      responses:
+        "204": { description: Restriction removed }
+        "403": { description: Stream owner permission required }
+  /v1/streams/{stream_id}/chat-messages/{message_id}:
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Delete a chat message
+      description: Stream owner only. Connected chat clients receive a message_deleted event.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: message_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Message deleted }
+        "403": { description: Stream owner permission required }
+        "404": { description: Message not found }
   /internal/v1/media/events:
     post:
       summary: Trusted MediaMTX online/offline lifecycle callback
