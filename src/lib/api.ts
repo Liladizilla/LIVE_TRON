@@ -279,3 +279,27 @@ export function toDiscoveryStream(stream: ApiStream): Stream {
     description: `Live broadcast from ${creator}.`,
   }
 }
+
+export type ApiChatMessage = {
+  id: string
+  stream_id: string
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  body: string
+  created_at: string
+}
+
+export async function fetchStreamChat(streamId: string, signal?: AbortSignal): Promise<ApiChatMessage[]> {
+  return authenticatedRequest<ApiChatMessage[]>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat?limit=60`,
+    { signal },
+  )
+}
+
+export async function sendStreamChatMessage(streamId: string, body: string): Promise<ApiChatMessage> {
+  return authenticatedRequest<ApiChatMessage>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat`,
+    { method: 'POST', body: JSON.stringify({ body }) },
+  )
+}
