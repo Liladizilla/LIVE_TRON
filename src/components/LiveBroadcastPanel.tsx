@@ -14,23 +14,32 @@ type LiveBroadcastPanelProps = {
 const STREAM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const ICE_GATHERING_TIMEOUT_MS = 15_000
 
-function waitForIceGatheringComplete(peer: RTCPeerConnection): Promise<void> {
+function waitForIceGatheringComplete(peer: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException('Broadcast start was cancelled.', 'AbortError'))
   if (peer.iceGatheringState === 'complete') return Promise.resolve()
 
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      peer.removeEventListener('icegatheringstatechange', onStateChange)
-      reject(new Error('ICE gathering timed out. Check STUN/TURN and firewall configuration.'))
-    }, ICE_GATHERING_TIMEOUT_MS)
-
-    const onStateChange = () => {
-      if (peer.iceGatheringState !== 'complete') return
+    const cleanup = () => {
       window.clearTimeout(timeout)
       peer.removeEventListener('icegatheringstatechange', onStateChange)
+      signal.removeEventListener('abort', onAbort)
+    }
+    const timeout = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('ICE gathering timed out. Check STUN/TURN and firewall configuration.'))
+    }, ICE_GATHERING_TIMEOUT_MS)
+    const onStateChange = () => {
+      if (peer.iceGatheringState !== 'complete') return
+      cleanup()
       resolve()
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(new DOMException('Broadcast start was cancelled.', 'AbortError'))
     }
 
     peer.addEventListener('icegatheringstatechange', onStateChange)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -156,7 +165,7 @@ export default function LiveBroadcastPanel({
       setStatus('connecting')
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
-      await waitForIceGatheringComplete(peer)
+      await waitForIceGatheringComplete(peer, controller.signal)
       if (controller.signal.aborted || peerRef.current !== peer) throw new Error('Broadcast start was cancelled.')
       const localSdp = peer.localDescription?.sdp
       if (!localSdp) throw new Error('The browser did not produce a WebRTC offer.')
