@@ -49,7 +49,10 @@ pub fn router() -> Router<AppState> {
             "/v1/streams/{stream_id}/chat",
             get(chat::history).post(chat::send),
         )
-        .route("/v1/streams/{stream_id}/chat-ticket", post(chat::create_ticket))
+        .route(
+            "/v1/streams/{stream_id}/chat-ticket",
+            post(chat::create_ticket),
+        )
         .route("/v1/streams/{stream_id}/chat-socket", get(chat::connect))
         .route("/v1/media/ice-config", get(signaling::ice_config))
         .route(
