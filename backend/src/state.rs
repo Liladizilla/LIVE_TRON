@@ -27,6 +27,8 @@ pub struct AppState {
     pub db: Option<PgPool>,
     pub jwt_secret: Option<Arc<String>>,
     pub media_event_secret: Option<Arc<String>>,
+    pub mediamtx_auth_secret: Option<Arc<String>>,
+
     pub ice: IceSettings,
     pub allowed_origins: Arc<Vec<String>>,
     pub(crate) signal_rooms: Arc<Mutex<HashMap<Uuid, SignalRoom>>>,
@@ -48,6 +50,11 @@ impl AppState {
 
     pub fn with_media_event_secret(mut self, secret: Option<String>) -> Self {
         self.media_event_secret = secret.map(Arc::new);
+        self
+    }
+
+    pub fn with_mediamtx_auth_secret(mut self, secret: Option<String>) -> Self {
+        self.mediamtx_auth_secret = secret.map(Arc::new);
         self
     }
 
