@@ -26,6 +26,8 @@ const CHAT_TICKET_TTL: Duration = Duration::from_secs(60);
 const CHAT_TICKET_PREFIX: &str = "live-tron.chat.ticket.";
 const CHAT_PROTOCOL: &str = "live-tron.chat.v1";
 const MAX_CHAT_CONNECTIONS_PER_STREAM: usize = 1000;
+const CHAT_PRESENCE_LEASE: Duration = Duration::from_secs(45);
+const CHAT_PRESENCE_HEARTBEAT: Duration = Duration::from_secs(15);
 
 fn pool(state: &AppState) -> Result<&PgPool, ApiError> {
     state.db.as_ref().ok_or(ApiError(
@@ -336,12 +338,38 @@ async fn handle_chat_socket(
     mut receiver: broadcast::Receiver<String>,
 ) {
     let (mut outgoing, mut incoming) = socket.split();
+    let connection_id = Uuid::new_v4();
+    let Some(db) = state.db.as_ref() else {
+        let _ = outgoing.send(Message::Close(None)).await;
+        drop(receiver);
+        drop(sender);
+        cleanup_chat_room(&state, stream_id).await;
+        return;
+    };
+    if let Err(error) = sqlx::query(
+        "INSERT INTO chat_presence_leases (connection_id, stream_id, user_id, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
+    )
+    .bind(connection_id)
+    .bind(stream_id)
+    .bind(user_id)
+    .bind(CHAT_PRESENCE_LEASE.as_secs() as f64)
+    .execute(db)
+    .await
+    {
+        tracing::error!(%stream_id, %error, "could not register chat presence lease");
+        let _ = outgoing.send(Message::Close(None)).await;
+        drop(receiver);
+        drop(sender);
+        cleanup_chat_room(&state, stream_id).await;
+        return;
+    }
+    let participants = count_chat_participants(db, stream_id).await.unwrap_or(1);
     let ready = serde_json::json!({
         "type": "ready",
         "stream_id": stream_id,
         "user_id": user_id,
         "protocol": CHAT_PROTOCOL,
-        "participants": sender.receiver_count()
+        "participants": participants
     });
     if outgoing
         .send(Message::Text(ready.to_string().into()))
@@ -353,11 +381,12 @@ async fn handle_chat_socket(
         cleanup_chat_room(&state, stream_id).await;
         return;
     }
-    let joined = serde_json::json!({
-        "type": "presence",
-        "participants": sender.receiver_count()
-    });
-    let _ = sender.send(joined.to_string());
+    publish_chat_event(
+        &state,
+        stream_id,
+        serde_json::json!({ "type": "presence", "participants": participants }),
+    ).await;
+    let mut presence_heartbeat = tokio::time::interval(CHAT_PRESENCE_HEARTBEAT);
     loop {
         tokio::select! {
             incoming_message = incoming.next() => {
@@ -369,6 +398,20 @@ async fn handle_chat_socket(
                     Some(Ok(Message::Text(text))) if text.len() > 1024 => break,
                     Some(Ok(Message::Binary(bytes))) if bytes.len() > 1024 => break,
                     Some(Ok(_)) => {}
+                }
+            }
+            _ = presence_heartbeat.tick() => {
+                if let Some(db) = state.db.as_ref() {
+                    if let Err(error) = sqlx::query(
+                        "UPDATE chat_presence_leases SET expires_at = now() + ($2::double precision * interval '1 second') WHERE connection_id = $1",
+                    )
+                    .bind(connection_id)
+                    .bind(CHAT_PRESENCE_LEASE.as_secs() as f64)
+                    .execute(db)
+                    .await
+                    {
+                        tracing::warn!(%stream_id, %error, "chat presence heartbeat failed");
+                    }
                 }
             }
             event = receiver.recv() => {
@@ -387,7 +430,31 @@ async fn handle_chat_socket(
     }
     drop(receiver);
     drop(sender);
+    if let Some(db) = state.db.as_ref() {
+        if let Err(error) = sqlx::query("DELETE FROM chat_presence_leases WHERE connection_id = $1")
+            .bind(connection_id)
+            .execute(db)
+            .await
+        {
+            tracing::warn!(%stream_id, %error, "could not remove chat presence lease");
+        } else if let Ok(participants) = count_chat_participants(db, stream_id).await {
+            publish_chat_event(
+                &state,
+                stream_id,
+                serde_json::json!({ "type": "presence", "participants": participants }),
+            ).await;
+        }
+    }
     cleanup_chat_room(&state, stream_id).await;
+}
+
+async fn count_chat_participants(db: &PgPool, stream_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT count(DISTINCT user_id) FROM chat_presence_leases WHERE stream_id = $1 AND expires_at > now()",
+    )
+    .bind(stream_id)
+    .fetch_one(db)
+    .await
 }
 
 async fn cleanup_chat_room(state: &AppState, stream_id: Uuid) {
