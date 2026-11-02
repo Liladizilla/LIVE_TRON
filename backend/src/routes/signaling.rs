@@ -349,8 +349,7 @@ pub async fn connect(
     }
     // A database lease makes peer presence visible across API replicas. The
     // partial unique index in migration 0009 guarantees one publisher per stream.
-    sqlx::query("DELETE FROM signal_peer_leases WHERE expires_at <= now()")
-        .execute(db)
+    reap_expired_signal_leases(db)
         .await
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_cleanup_failed"))?;
     let lease_result = sqlx::query(
@@ -606,6 +605,32 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
     cleanup_participant(&state, stream_id, participant_id, role).await;
 }
 
+async fn reap_expired_signal_leases(db: &PgPool) -> Result<(), sqlx::Error> {
+    let expired = sqlx::query_as::<_, (Uuid, Uuid, bool)>(
+        "DELETE FROM signal_peer_leases WHERE expires_at <= now() RETURNING stream_id, participant_id, publisher",
+    )
+    .fetch_all(db)
+    .await?;
+    for (stream_id, participant_id, publisher) in expired {
+        let event = json!({
+            "stream_id": stream_id,
+            "event": {
+                "type": "peer_left",
+                "from": participant_id,
+                "role": if publisher { "publisher" } else { "viewer" }
+            }
+        });
+        if let Err(error) = sqlx::query("SELECT pg_notify('live_tron_signal', $1)")
+            .bind(event.to_string())
+            .execute(db)
+            .await
+        {
+            tracing::warn!(%stream_id, %participant_id, %error, "expired peer leave notification failed");
+        }
+    }
+    Ok(())
+}
+
 async fn publish_signal_event(state: &AppState, stream_id: Uuid, event: Value) {
     let Some(db) = state.db.as_ref() else { return };
     let payload = json!({"stream_id": stream_id, "event": event}).to_string();
@@ -627,10 +652,7 @@ pub fn start_signal_listener(state: AppState) {
         let mut cleanup = tokio::time::interval(Duration::from_secs(60));
         loop {
             cleanup.tick().await;
-            if let Err(error) = sqlx::query("DELETE FROM signal_peer_leases WHERE expires_at <= now()")
-                .execute(&cleanup_db)
-                .await
-            {
+            if let Err(error) = reap_expired_signal_leases(&cleanup_db).await {
                 tracing::warn!(%error, "expired signaling peer lease cleanup failed");
             }
         }
