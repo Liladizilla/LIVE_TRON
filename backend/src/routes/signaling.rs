@@ -338,11 +338,35 @@ pub async fn connect(
         PeerRole::Viewer
     };
     let participant_id = Uuid::new_v4();
+    // A database lease makes peer presence visible across API replicas. A
+    // per-stream transaction lock makes capacity checks and reservations atomic.
+    reap_expired_signal_leases(db).await.map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signal_peer_cleanup_failed",
+        )
+    })?;
+    let mut reservation = db.begin().await.map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signal_peer_reservation_failed",
+        )
+    })?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(stream_id.to_string())
+        .execute(&mut *reservation)
+        .await
+        .map_err(|_| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signal_peer_reservation_failed",
+            )
+        })?;
     let active_peer_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM signal_peer_leases WHERE stream_id = $1 AND expires_at > now()",
     )
     .bind(stream_id)
-    .fetch_one(db)
+    .fetch_one(&mut *reservation)
     .await
     .map_err(|_| {
         ApiError(
@@ -356,14 +380,6 @@ pub async fn connect(
             "signal_room_capacity_reached",
         ));
     }
-    // A database lease makes peer presence visible across API replicas. The
-    // partial unique index in migration 0009 guarantees one publisher per stream.
-    reap_expired_signal_leases(db).await.map_err(|_| {
-        ApiError(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "signal_peer_cleanup_failed",
-        )
-    })?;
     let lease_result = sqlx::query(
         "INSERT INTO signal_peer_leases (participant_id, stream_id, publisher, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
     )
@@ -371,7 +387,7 @@ pub async fn connect(
     .bind(stream_id)
     .bind(role.is_publisher())
     .bind(SIGNAL_PEER_LEASE_SECONDS as f64)
-    .execute(db)
+    .execute(&mut *reservation)
     .await;
     if let Err(error) = lease_result {
         if error
@@ -388,6 +404,12 @@ pub async fn connect(
             "signal_peer_reservation_failed",
         ));
     }
+    reservation.commit().await.map_err(|_| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signal_peer_reservation_failed",
+        )
+    })?;
     let existing_peers = sqlx::query_as::<_, (Uuid, bool)>(
         "SELECT participant_id, publisher FROM signal_peer_leases WHERE stream_id = $1 AND expires_at > now() AND publisher <> $2",
     )
