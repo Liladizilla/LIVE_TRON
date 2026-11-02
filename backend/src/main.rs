@@ -1,5 +1,10 @@
 use anyhow::Context;
-use live_tron_api::{build_app, config::Settings, routes::chat, state::AppState};
+use live_tron_api::{
+    build_app,
+    config::Settings,
+    routes::{chat, signaling},
+    state::AppState,
+};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -52,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
             settings.turn_shared_secret,
         );
     chat::start_chat_listener(app_state.clone());
+    signaling::start_signal_listener(app_state.clone());
     let app = build_app(app_state, &settings.cors_origins);
     let listener = TcpListener::bind(settings.bind_addr)
         .await
