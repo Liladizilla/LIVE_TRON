@@ -594,15 +594,9 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                 match outbound {
                     Ok(payload) => {
                         let event = serde_json::from_str::<Value>(&payload).ok();
-                        let should_deliver = event.as_ref().is_some_and(|value| {
-                            value.get("to").and_then(Value::as_str)
-                                .is_some_and(|target| target == participant_id.to_string())
-                                || (value.get("to").is_none()
-                                    && (value.get("type").and_then(Value::as_str) == Some("resync_required")
-                                        || (matches!(value.get("type").and_then(Value::as_str), Some("peer_joined" | "peer_left"))
-                                            && value.get("from").and_then(Value::as_str)
-                                                .is_some_and(|sender| sender != participant_id.to_string()))))
-                        });
+                        let should_deliver = event
+                            .as_ref()
+                            .is_some_and(|value| should_deliver_signal_event(value, participant_id));
                         if should_deliver
                             && outgoing.send(Message::Text(payload.into())).await.is_err() {
                             break;
@@ -768,6 +762,23 @@ fn peer_roster(participants: &HashMap<Uuid, bool>, joining_role: PeerRole) -> Ve
         .collect()
 }
 
+fn should_deliver_signal_event(event: &Value, participant_id: Uuid) -> bool {
+    if event.get("to").and_then(Value::as_str) == Some(&participant_id.to_string()) {
+        return true;
+    }
+    if event.get("to").is_some() {
+        return false;
+    }
+    match event.get("type").and_then(Value::as_str) {
+        Some("resync_required") => true,
+        Some("peer_joined" | "peer_left") => event
+            .get("from")
+            .and_then(Value::as_str)
+            .is_some_and(|sender| sender != participant_id.to_string()),
+        _ => false,
+    }
+}
+
 fn peer_joined_event(participant_id: Uuid, role: PeerRole) -> Value {
     json!({
         "type": "peer_joined",
@@ -874,6 +885,36 @@ mod tests {
         assert!(valid_signal_ticket(&"a".repeat(64)));
         assert!(!valid_signal_ticket("short"));
         assert!(!valid_signal_ticket(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn distributed_signal_delivery_is_targeted_and_filters_self_events() {
+        let local_peer = Uuid::new_v4();
+        let remote_peer = Uuid::new_v4();
+        assert!(super::should_deliver_signal_event(
+            &serde_json::json!({"type":"answer","to":local_peer}),
+            local_peer
+        ));
+        assert!(!super::should_deliver_signal_event(
+            &serde_json::json!({"type":"answer","to":remote_peer}),
+            local_peer
+        ));
+        assert!(super::should_deliver_signal_event(
+            &serde_json::json!({"type":"peer_joined","from":remote_peer}),
+            local_peer
+        ));
+        assert!(!super::should_deliver_signal_event(
+            &serde_json::json!({"type":"peer_joined","from":local_peer}),
+            local_peer
+        ));
+        assert!(super::should_deliver_signal_event(
+            &serde_json::json!({"type":"resync_required"}),
+            local_peer
+        ));
+        assert!(!super::should_deliver_signal_event(
+            &serde_json::json!({"type":"unknown_event"}),
+            local_peer
+        ));
     }
 
     #[test]
