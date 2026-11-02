@@ -202,7 +202,12 @@ pub async fn create_ticket(
     sqlx::query("DELETE FROM signal_ws_tickets WHERE expires_at <= now()")
         .execute(db)
         .await
-        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_ticket_cleanup_failed"))?;
+        .map_err(|_| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signal_ticket_cleanup_failed",
+            )
+        })?;
     sqlx::query(
         "INSERT INTO signal_ws_tickets (ticket_hash, stream_id, publisher, publisher_key_hash, viewer_user_id, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6::double precision * interval '1 second'))",
     )
