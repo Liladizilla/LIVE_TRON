@@ -2,6 +2,7 @@ export type Category = 'For you' | 'Gaming' | 'Music' | 'Talk' | 'Education' | '
 
 export type Stream = {
   id: string
+  channelId?: string
   title: string
   creator: string
   handle: string
