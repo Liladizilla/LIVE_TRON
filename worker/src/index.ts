@@ -126,9 +126,8 @@ app.get('/api/streams/:streamId/chat/ws', async (c) => {
   const url = new URL(c.req.url)
   url.pathname = '/connect'
   url.searchParams.set('streamId', c.req.param('streamId'))
-  const headers = new Headers(c.req.raw.headers)
-  headers.set('x-live-tron-user', c.get('userId'))
-  return c.env.CHAT_ROOMS.get(id).fetch(new Request(url, { headers, method: 'GET' }))
+  url.searchParams.set('userId', c.get('userId'))
+  return c.env.CHAT_ROOMS.get(id).fetch(new Request(url, c.req.raw))
 })
 
 export class ChatRoom {
@@ -137,7 +136,7 @@ export class ChatRoom {
   constructor(state: DurableObjectState, env: Env) { this.state = state; this.env = env }
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    const userId = request.headers.get('x-live-tron-user')
+    const userId = url.searchParams.get('userId') ?? request.headers.get('x-live-tron-user')
     const streamId = url.searchParams.get('streamId') ?? request.headers.get('x-live-tron-stream')
     if (!userId || !streamId) return Response.json({ error: 'Authenticated room membership required' }, { status: 401 })
     if (url.pathname === '/history') {
