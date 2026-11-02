@@ -28,7 +28,7 @@ LIVE_TRON should feel like walking into a lively room, not browsing a catalogue.
 | Secondary text | `#B3A99F` | `#625950` |
 | Accent | `#FF6A45` | `#D94E2D` |
 
-Display type uses Bricolage Grotesque; interface text uses DM Sans. Cards and media use a 14px radius, controls use 10px, and the layout follows an 8px spacing rhythm.
+Display type uses Bricolage Grotesque; interface text uses DM Sans. Icons use the regular weight from Phosphor. Cards and media use a 14px radius, controls use 10px, and the layout follows an 8px spacing rhythm.
 
 ## Current implementation
 
