@@ -111,13 +111,13 @@ async fn postgres_signal_notifications_reach_independent_api_listeners() {
         .expect("publish signaling event");
 
     let received_a = tokio::time::timeout(Duration::from_secs(3), instance_a.recv())
-    .await
-    .expect("instance A notification timed out")
-    .expect("instance A listener failed");
+        .await
+        .expect("instance A notification timed out")
+        .expect("instance A listener failed");
     let received_b = tokio::time::timeout(Duration::from_secs(3), instance_b.recv())
-    .await
-    .expect("instance B notification timed out")
-    .expect("instance B listener failed");
+        .await
+        .expect("instance B notification timed out")
+        .expect("instance B listener failed");
     assert_eq!(received_a.payload(), payload);
     assert_eq!(received_b.payload(), payload);
 }
