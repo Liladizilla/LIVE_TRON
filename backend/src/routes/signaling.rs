@@ -685,6 +685,13 @@ async fn publish_signal_event(state: &AppState, stream_id: Uuid, event: Value) {
 /// Every API replica subscribes to the same signaling channel and forwards
 /// notifications only to sockets connected to that replica.
 pub fn start_signal_listener(state: AppState) {
+    start_signal_listener_with_ready(state, None);
+}
+
+fn start_signal_listener_with_ready(
+    state: AppState,
+    ready: Option<tokio::sync::oneshot::Sender<()>>,
+) {
     let Some(db) = state.db.clone() else { return };
     let cleanup_db = db.clone();
     tokio::spawn(async move {
@@ -712,6 +719,9 @@ pub fn start_signal_listener(state: AppState) {
                 continue;
             }
             tracing::info!("subscribed to PostgreSQL signaling notifications");
+            if let Some(ready) = ready.take() {
+                let _ = ready.send(());
+            }
             {
                 let rooms = state.signal_rooms.lock().await;
                 for (stream_id, room) in rooms.iter() {
@@ -1020,6 +1030,80 @@ mod tests {
         headers.insert(ORIGIN, "https://live.example".parse().unwrap());
         let allowed = vec!["https://live.example".to_owned()];
         assert!(super::request_origin_is_allowed(&headers, &allowed));
+    }
+
+    #[tokio::test]
+    async fn independent_api_listeners_fan_out_notifications_to_their_local_rooms() {
+        use crate::state::{AppState, SignalRoom};
+        use sqlx::postgres::PgPoolOptions;
+        use std::{collections::HashMap, time::Duration};
+        use tokio::sync::{broadcast, oneshot};
+
+        let database_url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must point to the PostgreSQL CI service");
+        let pool = PgPoolOptions::new()
+            .max_connections(8)
+            .connect(&database_url)
+            .await
+            .expect("connect to PostgreSQL");
+
+        let stream_id = Uuid::new_v4();
+        let state_a = AppState::new(Some(pool.clone()));
+        let state_b = AppState::new(Some(pool.clone()));
+        let (sender_a, _) = broadcast::channel(8);
+        let (sender_b, _) = broadcast::channel(8);
+        let mut receiver_a = sender_a.subscribe();
+        let mut receiver_b = sender_b.subscribe();
+
+        for (state, sender) in [(&state_a, sender_a), (&state_b, sender_b)] {
+            state.signal_rooms.lock().await.insert(
+                stream_id,
+                SignalRoom {
+                    sender,
+                    publisher: None,
+                    participants: HashMap::new(),
+                },
+            );
+        }
+
+        let (ready_a_tx, ready_a_rx) = oneshot::channel();
+        let (ready_b_tx, ready_b_rx) = oneshot::channel();
+        super::start_signal_listener_with_ready(state_a, Some(ready_a_tx));
+        super::start_signal_listener_with_ready(state_b, Some(ready_b_tx));
+        tokio::time::timeout(Duration::from_secs(5), ready_a_rx)
+            .await
+            .expect("API replica A did not subscribe")
+            .expect("API replica A readiness channel closed");
+        tokio::time::timeout(Duration::from_secs(5), ready_b_rx)
+            .await
+            .expect("API replica B did not subscribe")
+            .expect("API replica B readiness channel closed");
+
+        let event = serde_json::json!({
+            "type": "peer_joined",
+            "from": Uuid::new_v4(),
+            "role": "viewer"
+        });
+        let envelope = serde_json::json!({
+            "stream_id": stream_id,
+            "event": event
+        });
+        sqlx::query("SELECT pg_notify('live_tron_signal', $1)")
+            .bind(envelope.to_string())
+            .execute(&pool)
+            .await
+            .expect("publish signaling event");
+
+        let delivered_a = tokio::time::timeout(Duration::from_secs(3), receiver_a.recv())
+            .await
+            .expect("replica A local room did not receive event")
+            .expect("replica A local room closed");
+        let delivered_b = tokio::time::timeout(Duration::from_secs(3), receiver_b.recv())
+            .await
+            .expect("replica B local room did not receive event")
+            .expect("replica B local room closed");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&delivered_a).unwrap(), event);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&delivered_b).unwrap(), event);
     }
 
     #[tokio::test]
