@@ -2,9 +2,9 @@
 
 **Live, together.** A premium-dark livestream platform for creators and communities across gaming, music, talk, education, sports, IRL, and live commerce.
 
-> Current release: **0.1.0 · Discovery foundation**
+> Current release: **0.3.0 · Web discovery + account and creator API foundation**
 >
-> The current UI is a frontend preview. Stream cards use curated sample data and remote editorial imagery. No live media is being ingested or delivered yet.
+> The web client remains a frontend preview. The API now supports account sessions, profiles, channels, and follows. Creator broadcasting, chat, and media ingest/playback are not yet implemented.
 
 ## Product direction
 
@@ -16,15 +16,15 @@
 
 ## Current implementation
 
-- React 19, TypeScript, Vite 6.
-- Responsive application shell with desktop navigation and mobile drawer.
-- Discovery feed with category filters and client-side search.
-- Featured stream, stream cards, creator identity, viewer counts, and watch detail layout.
-- Local preview interactions: follow, save, and chat composition.
-- PWA manifest, app mark, install prompt handling, and a small offline app-shell service worker.
-- GitHub Actions CI for TypeScript checks and production builds.
+- React 19, TypeScript, Vite 6 responsive discovery experience and PWA shell.
+- Rust 2021 / Axum API with liveness, readiness, and capability metadata endpoints.
+- PostgreSQL connection pool and additive schema for users, channels, streams, follows, refresh sessions, and moderation reports.
+- Argon2id password hashing, short-lived HS256 access tokens, opaque refresh tokens stored as SHA-256 hashes, and transactional refresh rotation.
+- Registration, login, refresh, logout, current-profile, and profile-update endpoints.
+- Creator channel creation, owner-only channel updates, public channel discovery, creator profiles, and follow/unfollow endpoints.
+- Exact-origin CORS allowlist, validated environment settings, password/token unit tests, a PostgreSQL-backed account-to-channel integration flow, and CI.
 
-## Run locally
+## Run the web client
 
 Requirements: Node.js 22+ and npm.
 
@@ -35,16 +35,62 @@ npm run dev
 
 Open the URL printed by Vite (normally http://localhost:5173).
 
-Production validation:
+## Run the API
+
+Requirements: Rust stable and PostgreSQL 16+.
 
 ```bash
-npm run build
-npm run preview
+cd backend
+cp .env.example .env
+# Edit .env: set DATABASE_URL and generate a unique LIVE_TRON_JWT_SECRET
+# of at least 32 bytes (for example, `openssl rand -hex 32`). Create the PostgreSQL database/user first.
+cargo run --bin migrate
+cargo run --bin live-tron-api
 ```
 
-## Architecture plan
+The API and migration runner load `backend/.env` automatically when started from the `backend` directory; shell environment variables override file values. Never commit real credentials. If `LIVE_TRON_JWT_SECRET` is missing, authenticated routes fail closed with 503.
 
-The first release is intentionally a frontend foundation. The production system is planned as independently testable services:
+## API endpoints
+
+| Method | Endpoint | Access | Purpose |
+| --- | --- | --- | --- |
+| GET | `/healthz` | Public | Process liveness |
+| GET | `/readyz` | Public | PostgreSQL readiness |
+| GET | `/v1` | Public | API and media-plane capability metadata |
+| POST | `/v1/auth/register` | Public | Create account and initial session |
+| POST | `/v1/auth/login` | Public | Authenticate and issue tokens |
+| POST | `/v1/auth/refresh` | Public | Rotate refresh token and issue access token |
+| POST | `/v1/auth/logout` | Public | Revoke supplied refresh token |
+| GET | `/v1/me` | Bearer | Read current account |
+| PATCH | `/v1/me` | Bearer | Update display name |
+| GET | `/v1/channels` | Public | Search and filter channels |
+| POST | `/v1/channels` | Bearer | Create an owned channel |
+| GET | `/v1/channels/:slug` | Public | Read channel details |
+| PATCH | `/v1/channels/:slug` | Owner bearer | Update an owned channel |
+| POST | `/v1/channels/:slug/follow` | Bearer | Follow a channel |
+| DELETE | `/v1/channels/:slug/follow` | Bearer | Unfollow a channel |
+| GET | `/v1/creators/:slug` | Public | Read creator profile and channels |
+
+Protected endpoints require `Authorization: Bearer <access_token>`. Access tokens expire after 15 minutes. Refresh tokens are opaque 256-bit random values, returned once, stored only as SHA-256 hashes, and rotated transactionally on refresh. Store refresh tokens securely in a production client; do not put them in URLs or logs.
+
+Registration requires a valid-looking email, display name (2–80 characters), and password (12–128 bytes). The initial implementation does not yet include email verification, password reset, MFA, device/session management UI, or abuse-rate limiting. Do not expose this API publicly until those production controls are added.
+
+OpenAPI contract: [backend/openapi.yaml](backend/openapi.yaml).
+
+## Database model
+
+The additive initial migration creates:
+
+- `users` with a case-insensitive unique email index
+- `channels` with owner and stable slug
+- `streams` with lifecycle state, visibility, and one-live-stream-per-channel constraint
+- `follows` with a composite primary key
+- `refresh_sessions` storing token hashes, not raw refresh tokens
+- `moderation_reports` with a review queue index
+
+Migrations do not drop tables or cascade-delete application data.
+
+## Architecture plan
 
 1. **Web client / PWA** — React, TypeScript, accessible responsive UI, service worker, install/update lifecycle.
 2. **Application API** — authentication, profiles, channels, follows, discovery metadata, moderation and creator settings.
@@ -64,13 +110,16 @@ The first release is intentionally a frontend foundation. The production system 
 
 ## Roadmap
 
-- [x] Product identity and responsive visual foundation
-- [x] Discovery feed, categories, search, stream detail preview
-- [x] PWA manifest, icon, install prompt, offline shell
-- [x] Initial CI build workflow
-- [ ] Account system and creator/channel profiles
-- [ ] API contract, database schema, migrations, and seed data
-- [ ] Creator Studio and secure stream-key lifecycle
+- [x] Product identity, responsive discovery feed, categories, search, stream preview
+- [x] PWA manifest, app icon, install prompt, offline shell
+- [x] Rust API service and PostgreSQL migration runner
+- [x] Account registration, login, password hashing, token issuance and refresh rotation
+- [x] Current profile and profile update endpoints
+- [x] Creator channel creation, ownership checks, discovery and public profiles
+- [x] Follow and unfollow endpoints
+- [ ] Email verification, password reset, MFA, and session management
+- [ ] Rate limiting, abuse protection, audit events, and account lockout policy
+- [ ] Stream lifecycle and secure publishing credential issuance
 - [ ] WebRTC ingest, SFU routing, and viewer playback
 - [ ] Authenticated realtime chat, moderation, and presence
 - [ ] Interactive polls, reactions, and overlays
@@ -78,4 +127,4 @@ The first release is intentionally a frontend foundation. The production system 
 
 ## Project status
 
-This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The next engineering batch should establish the API contracts and persistence model before connecting account-dependent UI or real-time media.
+This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected.
