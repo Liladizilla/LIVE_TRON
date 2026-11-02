@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, Bell, Bookmark, BookmarkCheck, CalendarClock, Check, ChevronDown, ChevronLeft,
-  ChevronRight, Compass, Gamepad2, GraduationCap, Heart, Home, MapPin, Menu, MessageCircle,
-  Moon, Music2, Radio, Search, Send, ShieldCheck, SlidersHorizontal, Sun, Users, Video, X,
-  ShoppingBag, Sparkles, CircleHelp,
-} from 'lucide-react'
+  ArrowLeftIcon as ArrowLeft, BellIcon as Bell, BookmarkSimpleIcon as Bookmark,
+  BookmarkSimpleIcon as BookmarkCheck, CalendarBlankIcon as CalendarClock, CheckIcon as Check,
+  CaretDownIcon as ChevronDown, CaretLeftIcon as ChevronLeft, CaretRightIcon as ChevronRight,
+  CompassIcon as Compass, GameControllerIcon as Gamepad2, GraduationCapIcon as GraduationCap,
+  HeartIcon as Heart, HouseIcon as Home, MapPinIcon as MapPin, ListIcon as Menu,
+  ChatCircleIcon as MessageCircle, MoonIcon as Moon, MusicNotesIcon as Music2,
+  RadioIcon as Radio, MagnifyingGlassIcon as Search, PaperPlaneTiltIcon as Send,
+  SealCheckIcon as ShieldCheck, SlidersHorizontalIcon as SlidersHorizontal, SunIcon as Sun,
+  UsersIcon as Users, VideoCameraIcon as Video, XIcon as X, ShoppingBagIcon as ShoppingBag,
+  SparkleIcon as Sparkles, QuestionIcon as CircleHelp,
+} from '@phosphor-icons/react'
 import { categories, creators, formatViewers, streams, type Category, type Stream } from './data'
 
 type View = 'home' | 'discover' | 'following' | 'saved'
