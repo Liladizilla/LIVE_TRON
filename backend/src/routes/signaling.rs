@@ -676,22 +676,33 @@ pub fn start_signal_listener(state: AppState) {
             {
                 let rooms = state.signal_rooms.lock().await;
                 for (stream_id, room) in rooms.iter() {
-                    let _ = room.sender.send(json!({
-                        "type": "resync_required",
-                        "stream_id": stream_id
-                    }).to_string());
+                    let _ = room.sender.send(
+                        json!({
+                            "type": "resync_required",
+                            "stream_id": stream_id
+                        })
+                        .to_string(),
+                    );
                 }
             }
             loop {
                 match listener.recv().await {
                     Ok(notification) => {
-                        let Ok(value) = serde_json::from_str::<Value>(notification.payload()) else {
+                        let Ok(value) = serde_json::from_str::<Value>(notification.payload())
+                        else {
                             tracing::warn!("discarding malformed signaling notification");
                             continue;
                         };
-                        let Some(stream_id) = value.get("stream_id").and_then(Value::as_str)
-                            .and_then(|value| Uuid::parse_str(value).ok()) else { continue };
-                        let Some(event) = value.get("event") else { continue };
+                        let Some(stream_id) = value
+                            .get("stream_id")
+                            .and_then(Value::as_str)
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        else {
+                            continue;
+                        };
+                        let Some(event) = value.get("event") else {
+                            continue;
+                        };
                         let rooms = state.signal_rooms.lock().await;
                         if let Some(room) = rooms.get(&stream_id) {
                             let _ = room.sender.send(event.to_string());
