@@ -90,8 +90,14 @@ async fn postgres_signal_notifications_reach_independent_api_listeners() {
     let mut instance_b = PgListener::connect_with(&pool)
         .await
         .expect("connect instance B listener");
-    instance_a.listen("live_tron_signal").await.expect("subscribe A");
-    instance_b.listen("live_tron_signal").await.expect("subscribe B");
+    instance_a
+        .listen("live_tron_signal")
+        .await
+        .expect("subscribe A");
+    instance_b
+        .listen("live_tron_signal")
+        .await
+        .expect("subscribe B");
 
     let payload = format!(
         r#"{{"stream_id":"{}","event":{{"type":"peer_joined","from":"{}","role":"viewer"}}}}"#,
@@ -104,17 +110,11 @@ async fn postgres_signal_notifications_reach_independent_api_listeners() {
         .await
         .expect("publish signaling event");
 
-    let received_a = tokio::time::timeout(
-        Duration::from_secs(3),
-        instance_a.recv(),
-    )
+    let received_a = tokio::time::timeout(Duration::from_secs(3), instance_a.recv())
     .await
     .expect("instance A notification timed out")
     .expect("instance A listener failed");
-    let received_b = tokio::time::timeout(
-        Duration::from_secs(3),
-        instance_b.recv(),
-    )
+    let received_b = tokio::time::timeout(Duration::from_secs(3), instance_b.recv())
     .await
     .expect("instance B notification timed out")
     .expect("instance B listener failed");
@@ -145,7 +145,10 @@ async fn peer_capacity_reservations_are_serialized_across_api_instances() {
     .fetch_one(&pool)
     .await
     .expect("read final peer count");
-    assert_eq!(count, 256, "the distributed room cap must never be exceeded");
+    assert_eq!(
+        count, 256,
+        "the distributed room cap must never be exceeded"
+    );
 
     sqlx::query("DELETE FROM streams WHERE id = $1")
         .bind(stream_id)
