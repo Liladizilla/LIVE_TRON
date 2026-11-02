@@ -23,7 +23,6 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgListener, PgPool};
 use std::{
-    collections::HashMap,
     time::{Duration, Instant},
 };
 use tokio::sync::broadcast;
@@ -775,7 +774,10 @@ fn create_turn_credential(
 }
 
 #[cfg(test)]
-fn peer_roster(participants: &HashMap<Uuid, bool>, joining_role: PeerRole) -> Vec<(Uuid, bool)> {
+fn peer_roster(
+    participants: &std::collections::HashMap<Uuid, bool>,
+    joining_role: PeerRole,
+) -> Vec<(Uuid, bool)> {
     participants
         .iter()
         .filter_map(|(id, is_publisher)| {
