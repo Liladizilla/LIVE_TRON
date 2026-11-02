@@ -450,7 +450,6 @@ pub async fn connect(
                     stream_id,
                     participant_id,
                     role,
-                    room_sender: sender,
                     room_receiver: receiver,
                     existing_peers,
                 },
@@ -463,7 +462,6 @@ struct SocketContext {
     stream_id: Uuid,
     participant_id: Uuid,
     role: PeerRole,
-    room_sender: broadcast::Sender<String>,
     room_receiver: broadcast::Receiver<String>,
     existing_peers: Vec<(Uuid, bool)>,
 }
@@ -474,7 +472,6 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
         stream_id,
         participant_id,
         role,
-        room_sender,
         mut room_receiver,
         existing_peers,
     } = context;
@@ -762,6 +759,7 @@ fn create_turn_credential(
     Ok((username, STANDARD.encode(mac.finalize().into_bytes())))
 }
 
+#[cfg(test)]
 fn peer_roster(participants: &HashMap<Uuid, bool>, joining_role: PeerRole) -> Vec<(Uuid, bool)> {
     participants
         .iter()
