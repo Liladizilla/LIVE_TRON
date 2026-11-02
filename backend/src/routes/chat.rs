@@ -18,7 +18,7 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgListener, FromRow, PgPool};
-use std::{time::Duration};
+use std::time::Duration;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -195,6 +195,10 @@ pub async fn create_ticket(
     OsRng.fill_bytes(&mut bytes);
     let ticket = hex::encode(bytes);
     let ticket_hash = hash_chat_ticket(&ticket);
+    sqlx::query("DELETE FROM chat_ws_tickets WHERE expires_at <= now()")
+        .execute(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_cleanup_failed"))?;
     sqlx::query(
         "INSERT INTO chat_ws_tickets (ticket_hash, stream_id, user_id, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
     )
@@ -249,10 +253,9 @@ pub async fn connect(
     // Only the SHA-256 digest is stored; the bearer ticket is returned once to its creator.
     let ticket_hash = hash_chat_ticket(ticket);
     let record = sqlx::query_as::<_, (Uuid, Uuid)>(
-        "DELETE FROM chat_ws_tickets WHERE ticket_hash = $1 AND stream_id = $2 AND expires_at > now() RETURNING stream_id, user_id",
+        "DELETE FROM chat_ws_tickets WHERE ticket_hash = $1 AND expires_at > now() RETURNING stream_id, user_id",
     )
     .bind(ticket_hash)
-    .bind(stream_id)
     .fetch_optional(db)
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_consume_failed"))?
@@ -492,6 +495,15 @@ pub fn start_chat_listener(state: AppState) {
 mod websocket_origin_tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    #[test]
+    fn chat_ticket_storage_uses_a_fixed_length_one_way_digest() {
+        let ticket = "a".repeat(64);
+        let digest = hash_chat_ticket(&ticket);
+        assert_eq!(digest.len(), 64);
+        assert_ne!(digest, ticket);
+        assert_eq!(digest, hash_chat_ticket(&ticket));
+    }
 
     #[test]
     fn chat_websocket_requires_an_exact_allowlisted_origin() {
