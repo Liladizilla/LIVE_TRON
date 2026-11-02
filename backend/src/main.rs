@@ -1,5 +1,5 @@
 use anyhow::Context;
-use live_tron_api::{build_app, config::Settings, state::AppState};
+use live_tron_api::{build_app, config::Settings, routes::chat, state::AppState};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -42,18 +42,17 @@ async fn main() -> anyhow::Result<()> {
             "LIVE_TRON_MEDIAMTX_AUTH_SECRET is missing; MediaMTX authentication will fail closed"
         );
     }
-    let app = build_app(
-        AppState::new(db)
-            .with_jwt_secret(settings.jwt_secret)
-            .with_media_event_secret(settings.media_event_secret)
-            .with_mediamtx_auth_secret(settings.mediamtx_auth_secret)
-            .with_ice_settings(
-                settings.stun_urls,
-                settings.turn_urls,
-                settings.turn_shared_secret,
-            ),
-        &settings.cors_origins,
-    );
+    let app_state = AppState::new(db)
+        .with_jwt_secret(settings.jwt_secret)
+        .with_media_event_secret(settings.media_event_secret)
+        .with_mediamtx_auth_secret(settings.mediamtx_auth_secret)
+        .with_ice_settings(
+            settings.stun_urls,
+            settings.turn_urls,
+            settings.turn_shared_secret,
+        );
+    chat::start_chat_listener(app_state.clone());
+    let app = build_app(app_state, &settings.cors_origins);
     let listener = TcpListener::bind(settings.bind_addr)
         .await
         .with_context(|| format!("Could not bind to {}", settings.bind_addr))?;
