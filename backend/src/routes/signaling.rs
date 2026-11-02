@@ -1102,8 +1102,14 @@ mod tests {
             .await
             .expect("replica B local room did not receive event")
             .expect("replica B local room closed");
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&delivered_a).unwrap(), event);
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&delivered_b).unwrap(), event);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&delivered_a).unwrap(),
+            event
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&delivered_b).unwrap(),
+            event
+        );
     }
 
     #[tokio::test]
