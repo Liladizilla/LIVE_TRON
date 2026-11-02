@@ -397,7 +397,8 @@ async fn handle_chat_socket(
         &state,
         stream_id,
         serde_json::json!({ "type": "presence", "participants": participants }),
-    ).await;
+    )
+    .await;
     let mut presence_heartbeat = tokio::time::interval(CHAT_PRESENCE_HEARTBEAT);
     loop {
         tokio::select! {
@@ -454,7 +455,8 @@ async fn handle_chat_socket(
                 &state,
                 stream_id,
                 serde_json::json!({ "type": "presence", "participants": participants }),
-            ).await;
+            )
+            .await;
         }
     }
     cleanup_chat_room(&state, stream_id).await;
