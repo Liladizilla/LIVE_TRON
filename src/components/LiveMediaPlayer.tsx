@@ -39,6 +39,7 @@ export default function LiveMediaPlayer({ streamId, mediaServerUrl, iceServers }
 
   const configuredBaseUrl = mediaServerUrl ?? import.meta.env.VITE_MEDIAMTX_WHEP_BASE_URL ?? ''
   const baseUrl = configuredBaseUrl.trim().replace(/\/+$/, '')
+  const resolvedIceServers = useMemo<RTCIceServer[]>(() => iceServers ?? [], [iceServers])
 
   useEffect(() => {
     let disposed = false
