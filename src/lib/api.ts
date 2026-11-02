@@ -267,6 +267,7 @@ export function toDiscoveryStream(stream: ApiStream): Stream {
 
   return {
     id: stream.id,
+    channelId: stream.channel_id,
     title: stream.title,
     creator,
     handle,
