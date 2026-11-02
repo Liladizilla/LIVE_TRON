@@ -25,7 +25,7 @@ app.use('/api/*', cors({ origin: (origin, c) => origin === c.env.APP_ORIGIN ? or
 
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/health') return next()
-  const token = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
+  const token = c.req.header('Authorization')?.replace(/^Bearer\\s+/i, '')
   if (!token) return c.json({ error: 'Authentication required' }, 401)
   try {
     const jwksUrl = new URL(c.env.CLERK_JWKS_URL)
@@ -51,7 +51,6 @@ app.use('/api/*', async (c, next) => {
 })
 
 app.get('/api/health', (c) => c.json({ status: 'ok', service: 'live-tron-api', timestamp: new Date().toISOString() }))
-
 app.get('/api/me', async (c) => {
   const sql = sqlFor(c.env)
   try {
@@ -105,24 +104,31 @@ app.delete('/api/streams/:streamId/save', async (c) => {
 
 app.post('/api/media/upload/:key', async (c) => {
   const key = c.req.param('key')
-  if (!/^[a-zA-Z0-9/_-]{1,180}$/.test(key) || key.includes('..')) return c.json({ error: 'Invalid object key' }, 400)
+  if (!/^[a-zA-Z0-9/_-]{1,140}$/.test(key) || key.includes('..')) return c.json({ error: 'Invalid object key' }, 400)
   const contentType = c.req.header('Content-Type') ?? ''
   if (!['image/jpeg','image/png','image/webp','image/avif'].includes(contentType)) return c.json({ error: 'Unsupported media type' }, 415)
+  const length = Number(c.req.header('Content-Length') ?? 0)
+  if (length > 8 * 1024 * 1024) return c.json({ error: 'Image exceeds 8 MB' }, 413)
   const body = await c.req.arrayBuffer()
   if (body.byteLength < 1 || body.byteLength > 8 * 1024 * 1024) return c.json({ error: 'Image must be 1 byte to 8 MB' }, 413)
-  await c.env.MEDIA.put(key, body, { httpMetadata: { contentType } })
-  return c.json({ key, size: body.byteLength }, 201)
+  const objectKey = `users/${c.get('userId')}/${key}`
+  await c.env.MEDIA.put(objectKey, body, { httpMetadata: { contentType } })
+  return c.json({ key: objectKey, size: body.byteLength }, 201)
 })
 
 app.get('/api/streams/:streamId/chat', async (c) => {
   const id = c.env.CHAT_ROOMS.idFromName(c.req.param('streamId'))
-  return c.env.CHAT_ROOMS.get(id).fetch(new Request('https://chat.internal/history', { headers: { Authorization: c.req.header('Authorization') ?? '' } }))
+  const request = new Request('https://chat.internal/history', { headers: { 'x-live-tron-user': c.get('userId'), 'x-live-tron-stream': c.req.param('streamId') } })
+  return c.env.CHAT_ROOMS.get(id).fetch(request)
 })
-app.get('/ws/streams/:streamId', async (c) => {
+app.get('/api/streams/:streamId/chat/ws', async (c) => {
   const id = c.env.CHAT_ROOMS.idFromName(c.req.param('streamId'))
   const url = new URL(c.req.url)
   url.pathname = '/connect'
-  return c.env.CHAT_ROOMS.get(id).fetch(new Request(url, c.req.raw))
+  url.searchParams.set('streamId', c.req.param('streamId'))
+  const headers = new Headers(c.req.raw.headers)
+  headers.set('x-live-tron-user', c.get('userId'))
+  return c.env.CHAT_ROOMS.get(id).fetch(new Request(url, { headers, method: 'GET' }))
 })
 
 export class ChatRoom {
@@ -131,28 +137,52 @@ export class ChatRoom {
   constructor(state: DurableObjectState, env: Env) { this.state = state; this.env = env }
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
+    const userId = request.headers.get('x-live-tron-user')
+    const streamId = url.searchParams.get('streamId') ?? request.headers.get('x-live-tron-stream')
+    if (!userId || !streamId) return Response.json({ error: 'Authenticated room membership required' }, { status: 401 })
     if (url.pathname === '/history') {
-      const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '')
-      if (!token) return Response.json({ error: 'Authentication required' }, { status: 401 })
-      return Response.json({ messages: await this.state.storage.get('recentMessages') ?? [] })
+      const sql = sqlFor(this.env)
+      try {
+        const messages = await sql`SELECT m.id, m.body, m.created_at, u.display_name, u.username, u.avatar_url FROM chat_messages m JOIN users u ON u.id=m.user_id WHERE m.stream_id=${streamId} ORDER BY m.created_at DESC LIMIT 100`
+        return Response.json({ messages: messages.reverse() })
+      } finally { await sql.end() }
     }
     if (url.pathname !== '/connect' || request.headers.get('Upgrade') !== 'websocket') return new Response('WebSocket upgrade required', { status: 426 })
+    const sql = sqlFor(this.env)
+    try {
+      const [membership] = await sql`SELECT id FROM streams WHERE id=${streamId}`
+      if (!membership) return Response.json({ error: 'Stream not found' }, { status: 404 })
+    } finally { await sql.end() }
     const pair = new WebSocketPair()
     const client = pair[0], server = pair[1]
     this.state.acceptWebSocket(server)
+    server.serializeAttachment({ userId, streamId })
     server.send(JSON.stringify({ type: 'ready', connected: this.state.getWebSockets().length }))
     return new Response(null, { status: 101, webSocket: client })
   }
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string' || message.length > 1200) return
-    let event: { type?: string; body?: string; user?: string }
+    let event: { type?: string; body?: string }
     try { event = JSON.parse(message) as typeof event } catch { ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' })); return }
     if (event.type !== 'chat' || typeof event.body !== 'string' || !event.body.trim() || event.body.length > 1000) return
-    const entry = { type: 'chat', id: crypto.randomUUID(), body: event.body.trim(), user: 'Member', createdAt: new Date().toISOString() }
-    const recent = (await this.state.storage.get<typeof entry[]>('recentMessages') ?? []).slice(-99)
-    recent.push(entry)
-    await this.state.storage.put('recentMessages', recent)
-    for (const socket of this.state.getWebSockets()) socket.send(JSON.stringify(entry))
+    const identity = ws.deserializeAttachment() as { userId: string; streamId: string } | null
+    if (!identity?.userId || !identity.streamId) { ws.close(1008, 'Missing identity'); return }
+    const sql = sqlFor(this.env)
+    let entry: Record<string, unknown>
+    try {
+      const [saved] = await sql`
+        INSERT INTO chat_messages (stream_id, user_id, body)
+        VALUES (${identity.streamId}, ${identity.userId}, ${event.body.trim()})
+        RETURNING id, body, created_at
+      `
+      const [user] = await sql`SELECT display_name, username, avatar_url FROM users WHERE id=${identity.userId}`
+      entry = { type: 'chat', ...saved, user: user?.display_name ?? 'Member', username: user?.username ?? null, avatarUrl: user?.avatar_url ?? null }
+    } catch {
+      ws.send(JSON.stringify({ type: 'error', message: 'Message could not be saved' }))
+      return
+    } finally { await sql.end() }
+    const encoded = JSON.stringify(entry)
+    for (const socket of this.state.getWebSockets()) socket.send(encoded)
   }
   async webSocketClose(ws: WebSocket): Promise<void> { ws.close() }
   async webSocketError(ws: WebSocket): Promise<void> { ws.close(1011, 'WebSocket error') }
