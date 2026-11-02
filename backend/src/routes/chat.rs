@@ -16,8 +16,9 @@ use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool};
-use std::time::{Duration, Instant};
+use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgListener, FromRow, PgPool};
+use std::{time::Duration};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -193,22 +194,17 @@ pub async fn create_ticket(
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let ticket = hex::encode(bytes);
-    let mut tickets = state.chat_tickets.lock().await;
-    tickets.retain(|_, value| value.expires_at > Instant::now());
-    if tickets.len() >= 10_000 {
-        return Err(ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "chat_ticket_capacity_reached",
-        ));
-    }
-    tickets.insert(
-        ticket.clone(),
-        crate::state::ChatTicket {
-            stream_id,
-            user_id,
-            expires_at: Instant::now() + CHAT_TICKET_TTL,
-        },
-    );
+    let ticket_hash = hash_chat_ticket(&ticket);
+    sqlx::query(
+        "INSERT INTO chat_ws_tickets (ticket_hash, stream_id, user_id, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
+    )
+    .bind(ticket_hash)
+    .bind(stream_id)
+    .bind(user_id)
+    .bind(CHAT_TICKET_TTL.as_secs() as f64)
+    .execute(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_failed"))?;
     Ok(Json(ChatTicketResponse {
         ticket,
         expires_in: CHAT_TICKET_TTL.as_secs(),
@@ -248,27 +244,34 @@ pub async fn connect(
             "missing_or_invalid_chat_ticket",
         ))?;
 
-    let record = state
-        .chat_tickets
-        .lock()
-        .await
-        .remove(ticket)
-        .ok_or(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "chat_ticket_expired_or_used",
-        ))?;
-    if record.stream_id != stream_id || record.expires_at <= Instant::now() {
+    let db = pool(&state)?;
+    // DELETE ... RETURNING makes ticket consumption atomic across every API replica.
+    // Only the SHA-256 digest is stored; the bearer ticket is returned once to its creator.
+    let ticket_hash = hash_chat_ticket(ticket);
+    let record = sqlx::query_as::<_, (Uuid, Uuid)>(
+        "DELETE FROM chat_ws_tickets WHERE ticket_hash = $1 AND stream_id = $2 AND expires_at > now() RETURNING stream_id, user_id",
+    )
+    .bind(ticket_hash)
+    .bind(stream_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_consume_failed"))?
+    .ok_or(ApiError(
+        StatusCode::UNAUTHORIZED,
+        "chat_ticket_expired_or_used",
+    ))?;
+    let (ticket_stream_id, ticket_user_id) = record;
+    if ticket_stream_id != stream_id {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
             "chat_ticket_expired_or_used",
         ));
     }
-    let db = pool(&state)?;
     let authorized = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM streams s JOIN channels c ON c.id = s.channel_id JOIN users u ON u.id = $2 WHERE s.id = $1 AND s.status = 'live' AND (s.visibility <> 'private' OR c.owner_user_id = $2))",
     )
     .bind(stream_id)
-    .bind(record.user_id)
+    .bind(ticket_user_id)
     .fetch_one(db)
     .await
     .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_authorization_failed"))?;
@@ -309,7 +312,7 @@ pub async fn connect(
                 socket,
                 state_for_socket,
                 stream_id,
-                record.user_id,
+                ticket_user_id,
                 sender,
                 receiver,
             )
@@ -395,18 +398,95 @@ async fn cleanup_chat_room(state: &AppState, stream_id: Uuid) {
     }
 }
 
-pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
-    let Ok(payload) = serde_json::to_string(&serde_json::json!({
-        "type": "message",
-        "message": message
-    })) else {
+fn hash_chat_ticket(ticket: &str) -> String {
+    hex::encode(Sha256::digest(ticket.as_bytes()))
+}
+
+async fn publish_chat_event(state: &AppState, stream_id: Uuid, event: serde_json::Value) {
+    let Some(db) = state.db.as_ref() else {
         return;
     };
-    let rooms = state.chat_rooms.lock().await;
-    if let Some(sender) = rooms.get(&message.stream_id) {
-        let _ = sender.send(payload);
+    let payload = serde_json::json!({
+        "stream_id": stream_id,
+        "event": event
+    })
+    .to_string();
+    if let Err(error) = sqlx::query("SELECT pg_notify('live_tron_chat', $1)")
+        .bind(payload)
+        .execute(db)
+        .await
+    {
+        // The message is already durable in PostgreSQL. Clients recover missed events
+        // through the history endpoint after reconnect or a resync_required event.
+        tracing::warn!(%stream_id, %error, "could not publish live chat notification");
     }
 }
+
+pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
+    publish_chat_event(
+        state,
+        message.stream_id,
+        serde_json::json!({
+            "type": "message",
+            "message": message
+        }),
+    )
+    .await;
+}
+
+/// Start one PostgreSQL LISTEN loop per API process. Notifications are delivered to
+/// every connected replica; each process forwards them only to its own local sockets.
+pub fn start_chat_listener(state: AppState) {
+    let Some(db) = state.db.clone() else { return; };
+    tokio::spawn(async move {
+        loop {
+            let mut listener = match PgListener::connect_with(&db).await {
+                Ok(listener) => listener,
+                Err(error) => {
+                    tracing::error!(%error, "chat notification listener connection failed");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            if let Err(error) = listener.listen("live_tron_chat").await {
+                tracing::error!(%error, "chat notification subscription failed");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+            tracing::info!("subscribed to PostgreSQL live chat notifications");
+            loop {
+                match listener.recv().await {
+                    Ok(notification) => {
+                        let Ok(value) = serde_json::from_str::<serde_json::Value>(notification.payload()) else {
+                            tracing::warn!("discarding malformed live chat notification");
+                            continue;
+                        };
+                        let Some(stream_id) = value.get("stream_id").and_then(|v| v.as_str()).and_then(|v| Uuid::parse_str(v).ok()) else {
+                            tracing::warn!("discarding chat notification without a valid stream ID");
+                            continue;
+                        };
+                        let Some(event) = value.get("event") else {
+                            tracing::warn!(%stream_id, "discarding chat notification without an event");
+                            continue;
+                        };
+                        let payload = event.to_string();
+                        let rooms = state.chat_rooms.lock().await;
+                        if let Some(sender) = rooms.get(&stream_id) {
+                            let _ = sender.send(payload);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "chat notification listener disconnected; reconnecting");
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+}
+
+
 
 #[cfg(test)]
 mod websocket_origin_tests {
@@ -551,13 +631,13 @@ pub async fn delete_message(
 }
 
 async fn publish_message_deleted(state: &AppState, stream_id: Uuid, message_id: Uuid) {
-    let payload = serde_json::json!({
-        "type": "message_deleted",
-        "message_id": message_id
-    })
-    .to_string();
-    let rooms = state.chat_rooms.lock().await;
-    if let Some(sender) = rooms.get(&stream_id) {
-        let _ = sender.send(payload);
-    }
+    publish_chat_event(
+        state,
+        stream_id,
+        serde_json::json!({
+            "type": "message_deleted",
+            "message_id": message_id
+        }),
+    )
+    .await;
 }
