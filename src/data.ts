@@ -32,8 +32,8 @@ export const creators = [
   { id: 'imani', name: 'Imani Cole', handle: '@imanilearns', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: true },
   { id: 'theo', name: 'Theo Brooks', handle: '@theobrooks', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: false },
   { id: 'maya', name: 'Maya Njeri', handle: '@mayaoutside', avatar: 'https://images.unsplash.com/photo-1548142813-c348350df52b?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: true },
-  { id: 'eli', name: 'Eli Brooks', handle: '@eliplays', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: false },
-  { id: 'sana', name: 'Sana Ali', handle: '@sana.studio', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: false },
+  { id: 'eli', name: 'Eli Brooks', handle: '@eliplays', avatar: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: false },
+  { id: 'sana', name: 'Sana Ali', handle: '@sana.studio', avatar: 'https://images.unsplash.com/photo-1521119989659-a83eee488004?w=160&h=160&fit=crop&crop=faces&auto=format&q=85', verified: false },
 ]
 
 const photo = (id: string, width = 900) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${width}&q=85`
@@ -61,8 +61,8 @@ export const streams: Stream[] = [
   { id: 's20', creatorId: 'zuri', title: 'A better lunchbox, made together', creator: 'Zuri Wanjiku', handle: '@zuricooks', category: 'Commerce', viewers: 1320, image: photo('photo-1547592180-85f173990554'), avatarUrl: creators[5].avatar, duration: '00:17:48', verified: true, description: 'Simple lunch ideas, useful kitchen tools, and a live cooking Q&A.', status: 'live' },
   { id: 's21', creatorId: 'imani', title: 'A study room for the next 45 minutes', creator: 'Imani Cole', handle: '@imanilearns', category: 'Education', viewers: 2150, image: photo('photo-1434030216411-0b793f4b4173'), avatarUrl: creators[7].avatar, duration: '00:09:34', verified: true, description: 'Quiet company while we work through a short study session together.', status: 'live' },
   { id: 's22', creatorId: 'theo', title: 'Soundcheck before the Friday set', creator: 'Theo Brooks', handle: '@theobrooks', category: 'Music', viewers: 0, image: photo('photo-1506157786151-b8491531f063'), avatarUrl: creators[8].avatar, duration: 'Starts 8:30 pm', description: 'A short soundcheck before tonight’s full set.', status: 'scheduled', startsAt: 'Today, 8:30 pm' },
-  { id: 's23', creatorId: 'eli', title: 'Community lobby opens later tonight', creator: 'Eli Brooks', handle: '@eliplays', category: 'Gaming', viewers: 0, image: photo('photo-1542751371-adc38448a05e'), avatarUrl: creators[10].avatar, duration: 'Starts 9:00 pm', description: 'We will open the lobby for community games after dinner.', status: 'scheduled', startsAt: 'Today, 9:00 pm' },
-  { id: 's24', creatorId: 'sana', title: 'A studio tour from last week', creator: 'Sana Ali', handle: '@sana.studio', category: 'IRL', viewers: 0, image: photo('photo-1616486338812-3dadae4b4ace'), avatarUrl: creators[11].avatar, duration: 'Replay', description: 'A replay from the studio refresh, with notes and answers from the chat.', status: 'ended', verified: false },
+  { id: 's23', creatorId: 'eli', title: 'Community lobby opens later tonight', creator: 'Eli Brooks', handle: '@eliplays', category: 'Gaming', viewers: 0, image: photo('photo-1598550476439-6847785fcea6'), avatarUrl: creators[10].avatar, duration: 'Starts 9:00 pm', description: 'We will open the lobby for community games after dinner.', status: 'scheduled', startsAt: 'Today, 9:00 pm' },
+  { id: 's24', creatorId: 'sana', title: 'A studio tour from last week', creator: 'Sana Ali', handle: '@sana.studio', category: 'IRL', viewers: 0, image: photo('photo-1497366811353-6870744d04b2'), avatarUrl: creators[11].avatar, duration: 'Replay', description: 'A replay from the studio refresh, with notes and answers from the chat.', status: 'ended', verified: false },
 ]
 
 export const formatViewers = (count: number) =>
