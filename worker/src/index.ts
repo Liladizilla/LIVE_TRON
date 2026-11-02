@@ -51,7 +51,7 @@ app.use('/api/*', async (c, next) => {
   try {
     const [user] = await sql`
       INSERT INTO users (clerk_user_id, email, display_name)
-      VALUES (\${subject}, \${email}, \${displayName})
+      VALUES (${subject}, ${email}, ${displayName})
       ON CONFLICT (clerk_user_id) DO UPDATE SET updated_at = now()
       RETURNING id
     `
