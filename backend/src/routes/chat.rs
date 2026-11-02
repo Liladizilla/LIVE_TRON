@@ -198,7 +198,12 @@ pub async fn create_ticket(
     sqlx::query("DELETE FROM chat_ws_tickets WHERE expires_at <= now()")
         .execute(db)
         .await
-        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "chat_ticket_cleanup_failed"))?;
+        .map_err(|_| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "chat_ticket_cleanup_failed",
+            )
+        })?;
     sqlx::query(
         "INSERT INTO chat_ws_tickets (ticket_hash, stream_id, user_id, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
     )
@@ -440,7 +445,9 @@ pub(crate) async fn publish_message(state: &AppState, message: &ChatMessage) {
 /// Start one PostgreSQL LISTEN loop per API process. Notifications are delivered to
 /// every connected replica; each process forwards them only to its own local sockets.
 pub fn start_chat_listener(state: AppState) {
-    let Some(db) = state.db.clone() else { return; };
+    let Some(db) = state.db.clone() else {
+        return;
+    };
     tokio::spawn(async move {
         loop {
             let mut listener = match PgListener::connect_with(&db).await {
@@ -469,12 +476,20 @@ pub fn start_chat_listener(state: AppState) {
             loop {
                 match listener.recv().await {
                     Ok(notification) => {
-                        let Ok(value) = serde_json::from_str::<serde_json::Value>(notification.payload()) else {
+                        let Ok(value) =
+                            serde_json::from_str::<serde_json::Value>(notification.payload())
+                        else {
                             tracing::warn!("discarding malformed live chat notification");
                             continue;
                         };
-                        let Some(stream_id) = value.get("stream_id").and_then(|v| v.as_str()).and_then(|v| Uuid::parse_str(v).ok()) else {
-                            tracing::warn!("discarding chat notification without a valid stream ID");
+                        let Some(stream_id) = value
+                            .get("stream_id")
+                            .and_then(|v| v.as_str())
+                            .and_then(|v| Uuid::parse_str(v).ok())
+                        else {
+                            tracing::warn!(
+                                "discarding chat notification without a valid stream ID"
+                            );
                             continue;
                         };
                         let Some(event) = value.get("event") else {
@@ -497,8 +512,6 @@ pub fn start_chat_listener(state: AppState) {
         }
     });
 }
-
-
 
 #[cfg(test)]
 mod websocket_origin_tests {
