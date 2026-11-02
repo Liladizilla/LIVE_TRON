@@ -1,17 +1,7 @@
 use sqlx::PgPool;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
-
-pub struct SignalTicket {
-    pub stream_id: Uuid,
-    pub publisher: bool,
-    // Store only hashed publisher credentials or the authenticated viewer ID.
-    // This lets the WebSocket upgrade re-check access after ticket issuance.
-    pub publisher_key_hash: Option<String>,
-    pub viewer_user_id: Option<Uuid>,
-    pub expires_at: Instant,
-}
 
 pub struct SignalRoom {
     pub sender: broadcast::Sender<String>,
@@ -36,7 +26,6 @@ pub struct AppState {
     pub ice: IceSettings,
     pub allowed_origins: Arc<Vec<String>>,
     pub(crate) signal_rooms: Arc<Mutex<HashMap<Uuid, SignalRoom>>>,
-    pub(crate) signal_tickets: Arc<Mutex<HashMap<String, SignalTicket>>>,
     pub(crate) chat_rooms: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>,
 }
 
