@@ -719,9 +719,6 @@ fn start_signal_listener_with_ready(
                 continue;
             }
             tracing::info!("subscribed to PostgreSQL signaling notifications");
-            if let Some(ready) = ready.take() {
-                let _ = ready.send(());
-            }
             {
                 let rooms = state.signal_rooms.lock().await;
                 for (stream_id, room) in rooms.iter() {
@@ -733,6 +730,9 @@ fn start_signal_listener_with_ready(
                         .to_string(),
                     );
                 }
+            }
+            if let Some(ready) = ready.take() {
+                let _ = ready.send(());
             }
             loop {
                 match listener.recv().await {
