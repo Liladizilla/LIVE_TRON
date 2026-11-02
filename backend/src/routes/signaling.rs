@@ -424,7 +424,6 @@ pub async fn connect(
     if role.is_publisher() {
         room.publisher = Some(participant_id);
     }
-    let sender = room.sender.clone();
     drop(rooms);
 
     let state_for_socket = state.clone();
