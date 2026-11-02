@@ -1,4 +1,4 @@
-const CACHE_NAME = 'live-tron-shell-v1'
+const CACHE_NAME = 'live-tron-shell-v2-warm-ui'
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
