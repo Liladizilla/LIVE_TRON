@@ -2,12 +2,12 @@
   "id": "/",
   "name": "LIVE_TRON",
   "short_name": "LIVE_TRON",
-  "description": "Watch, discover, and broadcast live.",
+  "description": "Find live rooms, meet creators, and spend time with communities.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#090b0f",
-  "theme_color": "#090b0f",
+  "background_color": "#12100f",
+  "theme_color": "#12100f",
   "orientation": "any",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
