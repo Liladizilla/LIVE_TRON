@@ -1,5 +1,10 @@
 use anyhow::Context;
-use live_tron_api::{build_app, config::Settings, routes::{chat, signaling}, state::AppState};
+use live_tron_api::{
+    build_app,
+    config::Settings,
+    routes::{chat, signaling},
+    state::AppState,
+};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use tokio::net::TcpListener;
