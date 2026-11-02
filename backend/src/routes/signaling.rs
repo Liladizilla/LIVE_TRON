@@ -358,6 +358,14 @@ pub async fn connect(
         }
         return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_reservation_failed"));
     }
+    let existing_peers = sqlx::query_as::<_, (Uuid, bool)>(
+        "SELECT participant_id, publisher FROM signal_peer_leases WHERE stream_id = $1 AND expires_at > now() AND publisher <> $2",
+    )
+    .bind(stream_id)
+    .bind(role.is_publisher())
+    .fetch_all(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_roster_failed"))?;
     let mut rooms = state.signal_rooms.lock().await;
     let room = rooms.entry(stream_id).or_insert_with(|| {
         let (sender, _) = broadcast::channel(64);
@@ -367,13 +375,12 @@ pub async fn connect(
             participants: Default::default(),
         }
     });
-    if role.is_publisher() && room.publisher.is_some() {
-        return Err(ApiError(
-            StatusCode::CONFLICT,
-            "publisher_already_connected",
-        ));
-    }
     if room.participants.len() >= MAX_ROOM_PARTICIPANTS {
+        drop(rooms);
+        let _ = sqlx::query("DELETE FROM signal_peer_leases WHERE participant_id = $1")
+            .bind(participant_id)
+            .execute(db)
+            .await;
         return Err(ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
             "signal_room_capacity_reached",
@@ -381,7 +388,6 @@ pub async fn connect(
     }
     // A newly connected peer must receive the existing room roster. Existing
     // peers will receive this participant through the normal peer_joined event.
-    let existing_peers = peer_roster(&room.participants, role);
     let receiver = room.sender.subscribe();
     room.participants
         .insert(participant_id, role.is_publisher());
@@ -482,7 +488,6 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
     let mut signal_window = Instant::now();
     let mut signal_count = 0_u32;
     let joined = peer_joined_event(participant_id, role);
-    let _ = room_sender.send(joined.to_string());
     publish_signal_event(&state, stream_id, joined).await;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(SIGNAL_PEER_HEARTBEAT_SECONDS));
 
@@ -529,13 +534,14 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                             let _ = outgoing.send(Message::Text(json!({"type":"error","error":"signal_type_or_payload_rejected"}).to_string().into())).await;
                             continue;
                         }
+                        let Some(db) = state.db.as_ref() else { break };
                         let target_is_valid = sqlx::query_scalar::<_, bool>(
                             "SELECT EXISTS(SELECT 1 FROM signal_peer_leases WHERE participant_id = $1 AND stream_id = $2 AND expires_at > now() AND publisher <> $3)",
                         )
                         .bind(signal.to)
                         .bind(stream_id)
                         .bind(role.is_publisher())
-                        .fetch_one(state.db.as_ref().expect("signaling requires a database"))
+                        .fetch_one(db)
                         .await
                         .unwrap_or(false);
                         if !target_is_valid || signal.to == participant_id {
@@ -549,8 +555,6 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                             "role": role.as_str(),
                             "payload": signal.payload
                         });
-                        let payload = envelope.to_string();
-                        let _ = room_sender.send(payload.clone());
                         publish_signal_event(&state, stream_id, envelope).await;
                     }
                     Message::Ping(payload) => {
@@ -588,7 +592,6 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
         "from": participant_id,
         "role": role.as_str()
     });
-    let _ = room_sender.send(left.to_string());
     publish_signal_event(&state, stream_id, left).await;
     cleanup_participant(&state, stream_id, participant_id, role).await;
 }
