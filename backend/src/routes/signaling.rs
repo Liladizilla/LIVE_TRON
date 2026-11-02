@@ -29,7 +29,8 @@ use std::{
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-const MAX_SIGNAL_BYTES: usize = 16 * 1024;
+// PostgreSQL NOTIFY payloads are limited to roughly 8 KiB; leave headroom for the envelope.
+const MAX_SIGNAL_BYTES: usize = 6 * 1024;
 const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
 const SIGNAL_TICKET_TTL_SECONDS: u64 = 60;
 const MAX_ROOM_PARTICIPANTS: usize = 256;
@@ -581,16 +582,25 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                             value.get("to").and_then(Value::as_str)
                                 .is_some_and(|target| target == participant_id.to_string())
                                 || (value.get("to").is_none()
-                                    && matches!(value.get("type").and_then(Value::as_str), Some("peer_joined" | "peer_left"))
-                                    && value.get("from").and_then(Value::as_str)
-                                        .is_some_and(|sender| sender != participant_id.to_string()))
+                                    && (value.get("type").and_then(Value::as_str) == Some("resync_required")
+                                        || (matches!(value.get("type").and_then(Value::as_str), Some("peer_joined" | "peer_left"))
+                                            && value.get("from").and_then(Value::as_str)
+                                                .is_some_and(|sender| sender != participant_id.to_string()))))
                         });
                         if should_deliver
                             && outgoing.send(Message::Text(payload.into())).await.is_err() {
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let resync = json!({
+                            "type": "resync_required",
+                            "stream_id": stream_id
+                        });
+                        if outgoing.send(Message::Text(resync.to_string().into())).await.is_err() {
+                            break;
+                        }
+                    },
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
