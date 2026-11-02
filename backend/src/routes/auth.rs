@@ -177,14 +177,43 @@ pub async fn register(
     if !(12..=128).contains(&input.password.len()) {
         return Err(ApiError(StatusCode::BAD_REQUEST, "password_length_invalid"));
     }
+
+    // Account creation and its initial refresh session must commit together.
+    // Otherwise a failed session insert leaves an account that cannot sign in
+    // through the registration response path.
     let password_hash = hash_password(&input.password)?;
+    let refresh_token = create_refresh_token();
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed"))?;
     let user = sqlx::query_as::<_, UserRow>("INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, email, display_name, avatar_url, password_hash, created_at")
-        .bind(email).bind(password_hash).bind(display_name).fetch_one(db).await.map_err(|error| {
+        .bind(email).bind(password_hash).bind(display_name).fetch_one(&mut *tx).await.map_err(|error| {
             if error.as_database_error().is_some_and(|e| e.code().as_deref() == Some("23505")) {
                 ApiError(StatusCode::CONFLICT, "email_already_registered")
             } else { tracing::error!(error = %error, "user registration failed"); ApiError(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed") }
         })?;
-    Ok((StatusCode::CREATED, issue_session(db, user, jwt).await?))
+    sqlx::query(
+        "INSERT INTO refresh_sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+    )
+    .bind(user.id)
+    .bind(token_hash(&refresh_token))
+    .bind(Utc::now() + Duration::days(30))
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "session_create_failed"))?;
+    tx.commit()
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "registration_failed"))?;
+
+    let access_token = create_access_token(user.id, jwt)?;
+    Ok((StatusCode::CREATED, Json(TokenResponse {
+        access_token,
+        token_type: "Bearer",
+        expires_in: 900,
+        refresh_token,
+        user: user.into(),
+    })))
 }
 
 pub async fn login(
