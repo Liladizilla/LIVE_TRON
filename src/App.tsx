@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Bell, Bookmark, BookmarkCheck, CalendarClock, Check, ChevronDown, ChevronLeft,
   ChevronRight, Compass, Gamepad2, GraduationCap, Heart, Home, MapPin, Menu, MessageCircle,
@@ -20,8 +20,8 @@ function CreatorAvatar({ src, name, size = 'medium', live = false }: { src: stri
   return <span className={'creator-avatar creator-avatar-' + size + (live ? ' is-live' : '')}><img src={src} alt={name} loading="lazy" /></span>
 }
 
-function StreamCard({ stream, saved, onOpen, onSave, index }: {
-  stream: Stream; saved: boolean; onOpen: (stream: Stream) => void; onSave: (stream: Stream) => void; index: number
+function StreamCard({ stream, saved, onOpen, onSave, onNotify, index }: {
+  stream: Stream; saved: boolean; onOpen: (stream: Stream) => void; onSave: (stream: Stream) => void; onNotify: (stream: Stream) => void; index: number
 }) {
   const isLive = stream.status === 'live'
   return (
@@ -43,6 +43,7 @@ function StreamCard({ stream, saved, onOpen, onSave, index }: {
           <div className="stream-creator">{stream.creator}{stream.verified && <ShieldCheck size={14} aria-label="Verified creator" />}</div>
           <div className="stream-meta">{stream.category} <span>·</span> {isLive ? formatViewers(stream.viewers) + ' watching' : stream.status === 'scheduled' ? stream.startsAt : 'Replay available'}</div>
         </div>
+        {stream.status === 'scheduled' && <button className="notify-me-button" onClick={() => onNotify(stream)}>Notify me</button>}
         <button className={'save-control' + (saved ? ' is-saved' : '')} onClick={() => onSave(stream)} aria-label={saved ? 'Remove saved stream' : 'Save stream'} title={saved ? 'Saved' : 'Save stream'}>
           {saved ? <BookmarkCheck size={19} /> : <Bookmark size={19} />}
         </button>
@@ -78,8 +79,11 @@ function App() {
     { name: 'Jayden', message: 'That last transition was so clean.', role: 'member' },
     { name: 'Mika', message: 'Thanks for hanging out with us tonight.', role: 'creator' },
     { name: 'Nuru', message: 'Please do the slower version next.', role: 'member' },
+    { name: 'Asha', message: 'Quick note: keep spoilers out of chat, please.', role: 'moderator' },
   ])
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatExpanded, setChatExpanded] = useState(false)
+  const touchStartY = useRef<number | null>(null)
   const [reactionSent, setReactionSent] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [installState, setInstallState] = useState<'hidden' | 'available' | 'installed'>('hidden')
@@ -156,11 +160,13 @@ function App() {
   const openStream = (stream: Stream) => {
     setSelectedStream(stream)
     setChatOpen(false)
+    setChatExpanded(false)
     setChatMessages([
       { name: 'Lena', message: 'Just got here. This sounds lovely.', role: 'member' },
       { name: 'Jayden', message: 'That last transition was so clean.', role: 'member' },
       { name: stream.creator.split(' ')[0], message: 'Thanks for hanging out with us tonight.', role: 'creator' },
       { name: 'Nuru', message: 'Please do the slower version next.', role: 'member' },
+      { name: 'Asha', message: 'Quick note: keep spoilers out of chat, please.', role: 'moderator' },
     ])
     setReactionSent(false)
   }
@@ -265,10 +271,10 @@ function App() {
                 <div className="channel-row"><CreatorAvatar src={selectedStream.avatarUrl} name={selectedStream.creator} size="large" live={selectedStream.status === 'live'} /><div className="channel-copy"><strong>{selectedStream.creator} {selectedStream.verified && <ShieldCheck size={16} />}</strong><span>{selectedStream.handle}</span></div><button className={following.includes(selectedStream.creatorId) ? 'follow-button is-following' : 'follow-button'} onClick={() => toggleFollow(selectedStream.creatorId)}>{following.includes(selectedStream.creatorId) ? <><Check size={16} /> Following</> : 'Follow'}</button></div>
                 <div className="about-stream"><strong>About this stream</strong><p>{selectedStream.description}</p></div>
               </section>
-              <aside className={'chat-panel' + (chatOpen ? ' chat-panel-open' : '')}>
-                <div className="chat-header"><div><MessageCircle size={18} /><strong>Live chat</strong></div><span>Community room</span><button className="chat-close" onClick={() => setChatOpen(false)} aria-label="Close chat"><X size={18} /></button></div>
+              <aside className={'chat-panel' + (chatOpen ? ' chat-panel-open' : '') + (chatExpanded ? ' chat-expanded' : '')}>
+                <div className="chat-header" onTouchStart={(event) => { touchStartY.current = event.touches[0]?.clientY ?? null }} onTouchEnd={(event) => { if (touchStartY.current === null) return; const delta = touchStartY.current - (event.changedTouches[0]?.clientY ?? touchStartY.current); if (delta > 35) setChatExpanded(true); if (delta < -35) setChatExpanded(false); touchStartY.current = null }}><span className="chat-handle" /><div><MessageCircle size={18} /><strong>Live chat</strong></div><span>Community room</span><button className="chat-close" onClick={() => setChatOpen(false)} aria-label="Close chat"><X size={18} /></button></div>
                 <div className="pinned-message"><span>Pinned by the creator</span><p>Be kind to each other. Make room for new people joining the conversation.</p></div>
-                <div className="chat-feed" aria-live="polite">{chatMessages.map((item, index) => <div className={'chat-message' + (item.role === 'creator' ? ' from-creator' : '')} key={item.name + '-' + index}><strong>{item.name}{item.role === 'creator' && <span className="creator-badge">Creator</span>}</strong><p>{item.message}</p></div>)}</div>
+                <div className="chat-feed" aria-live="polite">{chatMessages.map((item, index) => <div className={'chat-message' + (item.role === 'creator' ? ' from-creator' : '')} key={item.name + '-' + index}><strong>{item.name}{item.role === 'creator' ? <span className="creator-badge">Creator</span> : item.role === 'moderator' ? <span className="moderator-badge">Moderator</span> : null}</strong><p>{item.message}</p></div>)}</div>
                 <button className="jump-button" onClick={() => document.querySelector('.chat-feed')?.scrollTo({ top: 99999, behavior: 'smooth' })}>New messages <ChevronDown size={14} /></button>
                 <button className={reactionSent ? 'reaction-button reacted' : 'reaction-button'} onClick={() => setReactionSent((value) => !value)}><Heart size={17} fill={reactionSent ? 'currentColor' : 'none'} />{reactionSent ? 'Reaction sent' : 'Send a reaction'}</button>
                 <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} placeholder="Write a message" aria-label="Write a chat message" /><button type="submit" disabled={!chatMessage.trim()} aria-label="Send message"><Send size={17} /></button></form>
@@ -309,7 +315,7 @@ function App() {
               </div>
               {view !== 'following' && view !== 'saved' && <div className="category-chips" role="tablist" aria-label="Stream topics">{categories.map((category) => { const Icon = categoryIcons[category]; return <button key={category} role="tab" aria-selected={activeCategory === category} className={activeCategory === category ? 'category-chip active' : 'category-chip'} onClick={() => setActiveCategory(category)}><Icon size={16} />{category}</button> })}</div>}
               {query && <p className="search-result-count">{filteredStreams.length} results for “{query}”</p>}
-              {filteredStreams.length ? <div className="stream-grid">{filteredStreams.map((stream, index) => <StreamCard key={stream.id} stream={stream} index={index} saved={saved.includes(stream.id)} onOpen={openStream} onSave={toggleSave} />)}</div> : <div className="empty-state"><span className="empty-icon">{view === 'saved' ? <Bookmark size={23} /> : view === 'following' ? <Users size={23} /> : <Search size={23} />}</span><h3>{view === 'saved' ? 'Nothing saved yet' : view === 'following' ? 'Your people will show up here' : 'No streams found'}</h3><p>{view === 'saved' ? 'Save a stream and it’ll be waiting here when you come back.' : view === 'following' ? 'Follow a few creators and their live rooms will be easy to find.' : 'Try another search or choose a different topic.'}</p><button className="secondary-button" onClick={() => { setQuery(''); setActiveCategory('For you'); if (view === 'following' || view === 'saved') selectView('discover') }}>{view === 'following' || view === 'saved' ? 'Discover creators' : 'Clear filters'}</button></div>}
+              {filteredStreams.length ? <div className="stream-grid">{filteredStreams.map((stream, index) => <StreamCard key={stream.id} stream={stream} index={index} saved={saved.includes(stream.id)} onOpen={openStream} onSave={toggleSave} onNotify={(item) => setNotice('Reminder set for ' + item.creator + ' at ' + item.startsAt + '.')} />)}</div> : <div className="empty-state"><span className="empty-icon">{view === 'saved' ? <Bookmark size={23} /> : view === 'following' ? <Users size={23} /> : <Search size={23} />}</span><h3>{view === 'saved' ? 'Nothing saved yet' : view === 'following' ? 'Your people will show up here' : 'No streams found'}</h3><p>{view === 'saved' ? 'Save a stream and it’ll be waiting here when you come back.' : view === 'following' ? 'Follow a few creators and their live rooms will be easy to find.' : 'Try another search or choose a different topic.'}</p><button className="secondary-button" onClick={() => { setQuery(''); setActiveCategory('For you'); if (view === 'following' || view === 'saved') selectView('discover') }}>{view === 'following' || view === 'saved' ? 'Discover creators' : 'Clear filters'}</button></div>}
             </section>
             <footer className="page-footer"><span>live_tron</span><div><button onClick={() => setNotice('Community guidelines are being prepared.')}>Community guidelines</button><button onClick={() => setNotice('Help centre is being prepared.')}>Help</button><button onClick={() => setNotice('Language settings will be available with account preferences.')}>English</button></div><span>Preview build · 0.2.0</span></footer>
           </main>
