@@ -337,6 +337,16 @@ pub async fn connect(
         PeerRole::Viewer
     };
     let participant_id = Uuid::new_v4();
+    let active_peer_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM signal_peer_leases WHERE stream_id = $1 AND expires_at > now()",
+    )
+    .bind(stream_id)
+    .fetch_one(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_capacity_check_failed"))?;
+    if active_peer_count >= MAX_ROOM_PARTICIPANTS as i64 {
+        return Err(ApiError(StatusCode::SERVICE_UNAVAILABLE, "signal_room_capacity_reached"));
+    }
     // A database lease makes peer presence visible across API replicas. The
     // partial unique index in migration 0009 guarantees one publisher per stream.
     sqlx::query("DELETE FROM signal_peer_leases WHERE expires_at <= now()")
@@ -612,6 +622,19 @@ async fn publish_signal_event(state: &AppState, stream_id: Uuid, event: Value) {
 /// notifications only to sockets connected to that replica.
 pub fn start_signal_listener(state: AppState) {
     let Some(db) = state.db.clone() else { return };
+    let cleanup_db = db.clone();
+    tokio::spawn(async move {
+        let mut cleanup = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            cleanup.tick().await;
+            if let Err(error) = sqlx::query("DELETE FROM signal_peer_leases WHERE expires_at <= now()")
+                .execute(&cleanup_db)
+                .await
+            {
+                tracing::warn!(%error, "expired signaling peer lease cleanup failed");
+            }
+        }
+    });
     tokio::spawn(async move {
         loop {
             let mut listener = match PgListener::connect_with(&db).await {
