@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import LiveMediaPlayer from './components/LiveMediaPlayer'
 import CreatorStudio from './components/CreatorStudio'
 import type { ApiChatMessage, ApiUser } from './lib/api'
-import { connectStreamChatSocket, fetchLiveStreams, fetchStreamChat, isApiConfigured, sendStreamChatMessage, toDiscoveryStream } from './lib/api'
+import { connectStreamChatSocket, deleteStreamChatMessage, fetchLiveStreams, fetchMyChannels, fetchStreamChat, isApiConfigured, removeStreamChatRestriction, sendStreamChatMessage, setStreamChatRestriction, toDiscoveryStream } from './lib/api'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
   Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
@@ -31,6 +31,8 @@ function App() {
   const [apiError, setApiError] = useState('')
   const [creatorStudioOpen, setCreatorStudioOpen] = useState(false)
   const [creatorUser, setCreatorUser] = useState<ApiUser | null>(null)
+  const [ownedChannelIds, setOwnedChannelIds] = useState<string[]>([])
+  const [moderationBusy, setModerationBusy] = useState<string | null>(null)
 
   useEffect(() => {
     const onBeforeInstall = (event: Event) => {
@@ -71,6 +73,20 @@ function App() {
     })
     return () => controller.abort()
   }, [activeCategory, query])
+
+  useEffect(() => {
+    if (!creatorUser) {
+      setOwnedChannelIds([])
+      return
+    }
+    let active = true
+    fetchMyChannels().then((channels) => {
+      if (active) setOwnedChannelIds(channels.map((channel) => channel.id))
+    }).catch(() => {
+      if (active) setOwnedChannelIds([])
+    })
+    return () => { active = false }
+  }, [creatorUser])
 
   useEffect(() => {
     if (!selectedStream) return
@@ -181,6 +197,7 @@ function App() {
   const visibleStreams = filteredStreams.filter((stream) => stream.id !== featured?.id)
   const isFollowing = (stream: Stream) => following.includes(stream.id)
   const canUseChat = !!selectedStream && isApiConfigured() && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id)
+  const canModerateChat = !!creatorUser && !!selectedStream?.channelId && ownedChannelIds.includes(selectedStream.channelId)
 
   const toggleFollow = (stream: Stream) => {
     setFollowing((current) => current.includes(stream.id) ? current.filter((id) => id !== stream.id) : [...current, stream.id])
@@ -208,6 +225,46 @@ function App() {
       setChatStatus(cause instanceof Error ? cause.message : 'Unable to send chat message.')
     } finally {
       setChatSending(false)
+    }
+  }
+  const moderateChatUser = async (userId: string, kind: 'mute' | 'ban') => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(userId)
+    try {
+      await setStreamChatRestriction(selectedStream.id, userId, {
+        kind,
+        duration_seconds: kind === 'mute' ? 600 : 3600,
+        reason: kind === 'mute' ? 'Muted by stream owner' : 'Banned from stream chat by owner',
+      })
+      setChatStatus(kind === 'mute' ? 'Participant muted for 10 minutes.' : 'Participant banned from chat for 1 hour.')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to apply chat restriction.')
+    } finally {
+      setModerationBusy(null)
+    }
+  }
+  const clearChatRestriction = async (userId: string) => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(userId)
+    try {
+      await removeStreamChatRestriction(selectedStream.id, userId)
+      setChatStatus('Participant chat restriction removed.')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to remove chat restriction.')
+    } finally {
+      setModerationBusy(null)
+    }
+  }
+  const removeChatMessage = async (messageId: string) => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(messageId)
+    try {
+      await deleteStreamChatMessage(selectedStream.id, messageId)
+      setChatMessages((current) => current.filter((item) => item.id !== messageId))
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to delete chat message.')
+    } finally {
+      setModerationBusy(null)
     }
   }
   const installApp = async () => {
@@ -290,7 +347,7 @@ function App() {
               <aside className="chat-panel">
                 <div className="chat-header"><div><MessageCircle size={17} /><strong>Live chat</strong></div><span>COMMUNITY</span></div>
                 <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
-                <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span></div>)}</div>
+                <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span>{canModerateChat && <div className="chat-mod-actions" style={{ display: 'flex', gap: 4, marginLeft: 'auto', flexWrap: 'wrap' }}><button type="button" disabled={!!moderationBusy} onClick={() => void removeChatMessage(item.id)} aria-label="Delete message" title="Delete message">Delete</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void moderateChatUser(item.user_id, 'mute')}>Mute 10m</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void moderateChatUser(item.user_id, 'ban')}>Ban 1h</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void clearChatRestriction(item.user_id)}>Unrestrict</button></div>}</div>)}</div>
                 <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} disabled={!canUseChat} placeholder={canUseChat ? "Sign in to join the conversation…" : "Chat unavailable in preview mode"} aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!canUseChat || !chatMessage.trim() || chatSending}><Send size={16} /></button></form>
                 <div className="chat-footer" role="status">{chatStatus || 'Live connection · 500 character limit'}</div>
               </aside>
