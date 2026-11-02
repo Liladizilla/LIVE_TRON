@@ -346,6 +346,12 @@ async fn handle_chat_socket(
         cleanup_chat_room(&state, stream_id).await;
         return;
     };
+    if let Err(error) = sqlx::query("DELETE FROM chat_presence_leases WHERE expires_at <= now()")
+        .execute(db)
+        .await
+    {
+        tracing::warn!(%error, "could not prune expired chat presence leases");
+    }
     if let Err(error) = sqlx::query(
         "INSERT INTO chat_presence_leases (connection_id, stream_id, user_id, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
     )
@@ -376,6 +382,12 @@ async fn handle_chat_socket(
         .await
         .is_err()
     {
+        if let Some(db) = state.db.as_ref() {
+            let _ = sqlx::query("DELETE FROM chat_presence_leases WHERE connection_id = $1")
+                .bind(connection_id)
+                .execute(db)
+                .await;
+        }
         drop(receiver);
         drop(sender);
         cleanup_chat_room(&state, stream_id).await;
@@ -459,17 +471,11 @@ async fn count_chat_participants(db: &PgPool, stream_id: Uuid) -> Result<i64, sq
 
 async fn cleanup_chat_room(state: &AppState, stream_id: Uuid) {
     let mut rooms = state.chat_rooms.lock().await;
-    if let Some(sender) = rooms.get(&stream_id) {
-        let participants = sender.receiver_count();
-        if participants == 0 {
-            rooms.remove(&stream_id);
-        } else {
-            let event = serde_json::json!({
-                "type": "presence",
-                "participants": participants
-            });
-            let _ = sender.send(event.to_string());
-        }
+    if rooms
+        .get(&stream_id)
+        .is_some_and(|sender| sender.receiver_count() == 0)
+    {
+        rooms.remove(&stream_id);
     }
 }
 
