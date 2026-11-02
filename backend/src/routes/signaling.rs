@@ -22,9 +22,7 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgListener, PgPool};
-use std::{
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
