@@ -6,7 +6,7 @@ import postgres from 'postgres'
 interface Env {
   DB: Hyperdrive
   MEDIA: R2Bucket
-  CHAT_ROOMS: DurableObjectNamespace<ChatRoom>
+  CHAT_ROOMS: DurableObjectNamespace
   CLERK_JWKS_URL: string
   CLERK_ISSUER: string
   APP_ORIGIN: string
@@ -25,29 +25,44 @@ app.use('/api/*', cors({ origin: (origin, c) => origin === c.env.APP_ORIGIN ? or
 
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/health') return next()
-  const token = c.req.header('Authorization')?.replace(/^Bearer\\s+/i, '')
+  const token = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'Authentication required' }, 401)
+
+  let subject: string
+  let email: string | null
+  let displayName: string
   try {
     const jwksUrl = new URL(c.env.CLERK_JWKS_URL)
     let jwks = jwksCache.get(jwksUrl.href)
-    if (!jwks) { jwks = createRemoteJWKSet(jwksUrl); jwksCache.set(jwksUrl.href, jwks) }
+    if (!jwks) {
+      jwks = createRemoteJWKSet(jwksUrl)
+      jwksCache.set(jwksUrl.href, jwks)
+    }
     const { payload } = await jwtVerify(token, jwks, { issuer: c.env.CLERK_ISSUER })
     if (typeof payload.sub !== 'string') return c.json({ error: 'Invalid identity token' }, 401)
-    const sql = sqlFor(c.env)
-    try {
-      const [user] = await sql`
-        INSERT INTO users (clerk_user_id, email, display_name)
-        VALUES (${payload.sub}, ${typeof payload.email === 'string' ? payload.email : null}, ${typeof payload.name === 'string' ? payload.name : 'New creator'})
-        ON CONFLICT (clerk_user_id) DO UPDATE SET updated_at = now()
-        RETURNING id
-      `
-      c.set('clerkUserId', payload.sub)
-      c.set('userId', user.id as string)
-    } finally { await sql.end() }
-    await next()
+    subject = payload.sub
+    email = typeof payload.email === 'string' ? payload.email : null
+    displayName = typeof payload.name === 'string' ? payload.name : 'New creator'
   } catch {
     return c.json({ error: 'Invalid or expired session' }, 401)
   }
+
+  const sql = sqlFor(c.env)
+  try {
+    const [user] = await sql`
+      INSERT INTO users (clerk_user_id, email, display_name)
+      VALUES (\${subject}, \${email}, \${displayName})
+      ON CONFLICT (clerk_user_id) DO UPDATE SET updated_at = now()
+      RETURNING id
+    `
+    c.set('clerkUserId', subject)
+    c.set('userId', user.id as string)
+  } catch {
+    return c.json({ error: 'Account service temporarily unavailable' }, 503)
+  } finally {
+    await sql.end()
+  }
+  await next()
 })
 
 app.get('/api/health', (c) => c.json({ status: 'ok', service: 'live-tron-api', timestamp: new Date().toISOString() }))
