@@ -457,6 +457,15 @@ pub fn start_chat_listener(state: AppState) {
                 continue;
             }
             tracing::info!("subscribed to PostgreSQL live chat notifications");
+            // Existing sockets may have missed events while this process was reconnecting.
+            // Force clients to refresh durable history before consuming new notifications.
+            {
+                let rooms = state.chat_rooms.lock().await;
+                let resync = serde_json::json!({"type":"resync_required"}).to_string();
+                for sender in rooms.values() {
+                    let _ = sender.send(resync.clone());
+                }
+            }
             loop {
                 match listener.recv().await {
                     Ok(notification) => {
