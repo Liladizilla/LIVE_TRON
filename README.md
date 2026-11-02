@@ -1,28 +1,45 @@
 # LIVE_TRON
 
-**Live, together.** A premium-dark livestream platform for creators and communities across gaming, music, talk, education, sports, IRL, and live commerce.
+A live streaming platform for people and communities across gaming, music, talk, education, sports, IRL, and live commerce.
 
-> Current release: **0.1.0 · Discovery foundation**
+> Current release: **0.2.0 · Human-first discovery preview**
 >
-> The current UI is a frontend preview. Stream cards use curated sample data and remote editorial imagery. No live media is being ingested or delivered yet.
+> The interface uses seeded sample streams and remote editorial photography. No live media is being ingested or delivered yet. Chat, follows, saves, reminders, and account controls shown in this build are local preview interactions.
 
 ## Product direction
 
+LIVE_TRON should feel like walking into a lively room, not browsing a catalogue. The interface puts creators and their activity ahead of thumbnails, with calm typography, warm surfaces, restrained motion, and a single ember accent.
+
 - Responsive web application with an installable Progressive Web App (PWA).
-- One discovery and viewing experience across desktop, tablet, and mobile.
-- Category-agnostic discovery, creator channels, live chat, and eventually interactive live experiences.
-- Premium dark visual system: graphite surfaces, restrained acid-lime accent, clear typography, low visual noise.
-- Real-time media must be implemented and tested as infrastructure, not simulated by a decorative player.
+- A human-first home feed, featured live room, live creator row, topic filters, and varied stream cards.
+- A dedicated watch layout with player state, creator information, and a local chat preview.
+- Dark and light themes, following and saved views, command search, and keyboard-accessible navigation.
+- No simulated live playback. The player clearly identifies itself as a preview until the media plane is connected.
+
+## Visual system
+
+| Token | Dark theme | Light theme |
+| --- | --- | --- |
+| Background | `#12100F` | `#FAF6F1` |
+| Surface | `#1B1816` | `#FFFFFF` |
+| Raised surface | `#25211E` | `#F3EEE8` |
+| Border | `#322D29` | `#E4DCD3` |
+| Primary text | `#F4EFE9` | `#1F1A17` |
+| Secondary text | `#B3A99F` | `#625950` |
+| Accent | `#FF6A45` | `#D94E2D` |
+
+Display type uses Bricolage Grotesque; interface text uses DM Sans. Icons use the regular weight from Phosphor. Cards and media use a 14px radius, controls use 10px, and the layout follows an 8px spacing rhythm.
 
 ## Current implementation
 
-- React 19, TypeScript, Vite 6.
-- Responsive application shell with desktop navigation and mobile drawer.
-- Discovery feed with category filters and client-side search.
-- Featured stream, stream cards, creator identity, viewer counts, and watch detail layout.
-- Local preview interactions: follow, save, and chat composition.
-- PWA manifest, app mark, install prompt handling, and a small offline app-shell service worker.
-- GitHub Actions CI for TypeScript checks and production builds.
+- React 19, TypeScript, and Vite 6.
+- Warm, responsive application shell with a collapsible desktop sidebar, tablet icon rail, and mobile bottom navigation.
+- Human-first home page with greeting, featured live story, manual and timed story switching, and followed creator avatars.
+- Twenty-four seeded streams across eight categories and twelve creator profiles with photo avatars.
+- Mixed-width discovery cards, category filters, search, sorting, save/follow interactions, and empty states.
+- Watch preview layout with creator details, follow action, pinned chat note, local messages, and a mobile chat sheet.
+- Dark/light theme toggle, system-preference default, command palette shortcut, PWA install prompt, and offline shell.
+- Sample photos are requested from Unsplash at runtime and therefore require a network connection.
 
 ## Run locally
 
@@ -42,14 +59,12 @@ npm run build
 npm run preview
 ```
 
-## Architecture plan
-
-The first release is intentionally a frontend foundation. The production system is planned as independently testable services:
+## Production architecture plan
 
 1. **Web client / PWA** — React, TypeScript, accessible responsive UI, service worker, install/update lifecycle.
-2. **Application API** — authentication, profiles, channels, follows, discovery metadata, moderation and creator settings.
-3. **Media plane** — WebRTC ingest and playback through WHIP/WHEP-compatible endpoints and a real SFU router. A signaling endpoint alone is not an SFU.
-4. **Realtime plane** — authenticated chat, presence, reactions, polls, and event delivery over WebSocket/data channels where appropriate.
+2. **Application API** — authentication, profiles, channels, follows, discovery metadata, moderation, and creator settings.
+3. **Media plane** — WebRTC ingest and playback through WHIP/WHEP-compatible endpoints and a real SFU router.
+4. **Realtime plane** — authenticated chat, presence, reactions, polls, and event delivery.
 5. **Persistence** — PostgreSQL for durable application data; Redis for ephemeral presence, rate limits, and fanout where justified.
 6. **Operations** — metrics, structured logs, abuse controls, TURN capacity, regional routing, and media quality telemetry.
 
@@ -65,17 +80,14 @@ The first release is intentionally a frontend foundation. The production system 
 ## Roadmap
 
 - [x] Product identity and responsive visual foundation
-- [x] Discovery feed, categories, search, stream detail preview
+- [x] Human-first discovery preview and 24-stream seed dataset
+- [x] Watch page preview, theme toggle, command search, and responsive navigation
 - [x] PWA manifest, icon, install prompt, offline shell
-- [x] Initial CI build workflow
 - [ ] Account system and creator/channel profiles
 - [ ] API contract, database schema, migrations, and seed data
 - [ ] Creator Studio and secure stream-key lifecycle
 - [ ] WebRTC ingest, SFU routing, and viewer playback
 - [ ] Authenticated realtime chat, moderation, and presence
-- [ ] Interactive polls, reactions, and overlays
 - [ ] Creator analytics, reporting, and production deployment
 
-## Project status
-
-This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The next engineering batch should establish the API contracts and persistence model before connecting account-dependent UI or real-time media.
+Features marked preview/local are not backed by a production API. The next engineering work should connect the discovery surface to persistent account and stream data, then connect the watch page to the real media and chat services.
