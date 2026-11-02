@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import LiveMediaPlayer from './components/LiveMediaPlayer'
 import CreatorStudio from './components/CreatorStudio'
-import type { ApiUser } from './lib/api'
-import { fetchLiveStreams, isApiConfigured, toDiscoveryStream } from './lib/api'
+import type { ApiChatMessage, ApiUser } from './lib/api'
+import { connectStreamChatSocket, deleteStreamChatMessage, fetchLiveStreams, fetchMyChannels, fetchStreamChat, isApiConfigured, removeStreamChatRestriction, sendStreamChatMessage, setStreamChatRestriction, toDiscoveryStream } from './lib/api'
 import {
   ArrowLeft, Bell, Bookmark, Check, ChevronDown, Compass, Flame, Headphones,
   Home, Menu, MessageCircle, MonitorPlay, MoreHorizontal, Play, Plus, Radio,
@@ -20,11 +20,9 @@ function App() {
   const [saved, setSaved] = useState<string[]>([])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [chatMessage, setChatMessage] = useState('')
-  const [chatMessages, setChatMessages] = useState([
-    { name: 'jayden', message: 'This lighting is unreal.' },
-    { name: 'lena.wav', message: 'Just joined. What did I miss?' },
-    { name: 'pixelpilot', message: 'The detail on that build 👀' },
-  ])
+  const [chatMessages, setChatMessages] = useState<ApiChatMessage[]>([])
+  const [chatStatus, setChatStatus] = useState('Chat loads when a live broadcast is connected.')
+  const [chatSending, setChatSending] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [installState, setInstallState] = useState<'hidden' | 'available' | 'installed'>('hidden')
   const [notice, setNotice] = useState('')
@@ -33,6 +31,8 @@ function App() {
   const [apiError, setApiError] = useState('')
   const [creatorStudioOpen, setCreatorStudioOpen] = useState(false)
   const [creatorUser, setCreatorUser] = useState<ApiUser | null>(null)
+  const [ownedChannelIds, setOwnedChannelIds] = useState<string[]>([])
+  const [moderationBusy, setModerationBusy] = useState<string | null>(null)
 
   useEffect(() => {
     const onBeforeInstall = (event: Event) => {
@@ -74,6 +74,115 @@ function App() {
     return () => controller.abort()
   }, [activeCategory, query])
 
+  useEffect(() => {
+    if (!creatorUser) {
+      setOwnedChannelIds([])
+      return
+    }
+    let active = true
+    fetchMyChannels().then((channels) => {
+      if (active) setOwnedChannelIds(channels.map((channel) => channel.id))
+    }).catch(() => {
+      if (active) setOwnedChannelIds([])
+    })
+    return () => { active = false }
+  }, [creatorUser])
+
+  useEffect(() => {
+    if (!selectedStream) return
+    const streamId = selectedStream.id
+    const isStreamId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(streamId)
+    if (!isStreamId || !isApiConfigured()) {
+      setChatMessages([])
+      setChatStatus('Live chat is available on connected LIVE_TRON broadcasts.')
+      return
+    }
+    let active = true
+    let socket: WebSocket | null = null
+    let reconnectTimer = 0
+    let reconnectDelay = 1500
+    const controller = new AbortController()
+    const mergeMessages = (incoming: ApiChatMessage[]) => {
+      setChatMessages((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]))
+        incoming.forEach((item) => byId.set(item.id, item))
+        return [...byId.values()]
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))
+          .slice(-100)
+      })
+    }
+    const loadHistory = async () => {
+      const history = await fetchStreamChat(streamId, controller.signal)
+      if (active) mergeMessages(history)
+    }
+    const connect = async () => {
+      try {
+        socket = await connectStreamChatSocket(streamId)
+        if (!active) {
+          socket.close()
+          return
+        }
+        reconnectDelay = 1500
+        void loadHistory().catch(() => {
+          if (active) setChatStatus('Connected · history refresh failed')
+        })
+        socket.onmessage = (event) => {
+          if (!active || typeof event.data !== 'string') return
+          try {
+            const payload = JSON.parse(event.data) as { type?: string; message?: ApiChatMessage }
+            if (payload.type === 'message' && payload.message) {
+              mergeMessages([payload.message])
+              setChatStatus('Connected · messages arrive live')
+            } else if (payload.type === 'message_deleted' && typeof (payload as { message_id?: unknown }).message_id === 'string') {
+              const messageId = (payload as { message_id: string }).message_id
+              setChatMessages((current) => current.filter((item) => item.id !== messageId))
+            } else if (payload.type === 'presence' && typeof (payload as { participants?: unknown }).participants === 'number') {
+              const participants = (payload as { participants: number }).participants
+              setChatStatus(`Live chat · ${participants} connected`)
+            } else if (payload.type === 'resync_required') {
+              void loadHistory().catch(() => setChatStatus('Chat history needs to be refreshed.'))
+            } else if (payload.type === 'ready') {
+              setChatStatus('Connected · messages arrive live')
+            }
+          } catch {
+            setChatStatus('Received an invalid chat event.')
+          }
+        }
+        socket.onclose = () => {
+          if (!active) return
+          setChatStatus('Chat disconnected. Reconnecting…')
+          reconnectTimer = window.setTimeout(() => {
+            reconnectDelay = Math.min(reconnectDelay * 2, 15000)
+            void connect()
+          }, reconnectDelay)
+        }
+        socket.onerror = () => setChatStatus('Chat connection interrupted.')
+      } catch (cause) {
+        if (!active) return
+        setChatStatus(cause instanceof Error ? cause.message : 'Unable to connect to live chat.')
+        reconnectTimer = window.setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, 15000)
+          void connect()
+        }, reconnectDelay)
+      }
+    }
+    setChatMessages([])
+    setChatStatus('Loading chat history…')
+    void loadHistory().then(() => {
+      if (active) void connect()
+    }).catch((cause) => {
+      if (active && !controller.signal.aborted) {
+        setChatStatus(cause instanceof Error ? cause.message : 'Unable to load live chat.')
+      }
+    })
+    return () => {
+      active = false
+      controller.abort()
+      window.clearTimeout(reconnectTimer)
+      socket?.close(1000, 'Stream changed')
+    }
+  }, [selectedStream?.id])
+
   const catalogue = isApiConfigured() ? (apiStreams ?? []) : streams
   const filteredStreams = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -87,6 +196,8 @@ function App() {
   const featured = catalogue.find((stream) => stream.featured) ?? catalogue[0]
   const visibleStreams = filteredStreams.filter((stream) => stream.id !== featured?.id)
   const isFollowing = (stream: Stream) => following.includes(stream.id)
+  const canUseChat = !!selectedStream && isApiConfigured() && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedStream.id)
+  const canModerateChat = !!creatorUser && !!selectedStream?.channelId && ownedChannelIds.includes(selectedStream.channelId)
 
   const toggleFollow = (stream: Stream) => {
     setFollowing((current) => current.includes(stream.id) ? current.filter((id) => id !== stream.id) : [...current, stream.id])
@@ -98,17 +209,63 @@ function App() {
   }
   const openStream = (stream: Stream) => {
     setSelectedStream(stream)
-    setChatMessages([
-      { name: 'jayden', message: 'This lighting is unreal.' },
-      { name: 'lena.wav', message: 'Just joined. What did I miss?' },
-      { name: 'pixelpilot', message: 'The detail on that build 👀' },
-    ])
+    setChatMessages([])
+    setChatStatus('Connecting to live chat…')
   }
-  const sendChat = () => {
-    const message = chatMessage.trim()
-    if (!message) return
-    setChatMessages((current) => [...current, { name: 'you', message }])
-    setChatMessage('')
+  const sendChat = async () => {
+    const body = chatMessage.trim()
+    if (!body || !selectedStream || chatSending) return
+    setChatSending(true)
+    setChatStatus('')
+    try {
+      const message = await sendStreamChatMessage(selectedStream.id, body)
+      setChatMessages((current) => [...current.filter((item) => item.id !== message.id), message])
+      setChatMessage('')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to send chat message.')
+    } finally {
+      setChatSending(false)
+    }
+  }
+  const moderateChatUser = async (userId: string, kind: 'mute' | 'ban') => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(userId)
+    try {
+      await setStreamChatRestriction(selectedStream.id, userId, {
+        kind,
+        duration_seconds: kind === 'mute' ? 600 : 3600,
+        reason: kind === 'mute' ? 'Muted by stream owner' : 'Banned from stream chat by owner',
+      })
+      setChatStatus(kind === 'mute' ? 'Participant muted for 10 minutes.' : 'Participant banned from chat for 1 hour.')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to apply chat restriction.')
+    } finally {
+      setModerationBusy(null)
+    }
+  }
+  const clearChatRestriction = async (userId: string) => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(userId)
+    try {
+      await removeStreamChatRestriction(selectedStream.id, userId)
+      setChatStatus('Participant chat restriction removed.')
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to remove chat restriction.')
+    } finally {
+      setModerationBusy(null)
+    }
+  }
+  const removeChatMessage = async (messageId: string) => {
+    if (!selectedStream || moderationBusy) return
+    setModerationBusy(messageId)
+    try {
+      await deleteStreamChatMessage(selectedStream.id, messageId)
+      setChatMessages((current) => current.filter((item) => item.id !== messageId))
+    } catch (cause) {
+      setChatStatus(cause instanceof Error ? cause.message : 'Unable to delete chat message.')
+    } finally {
+      setModerationBusy(null)
+    }
   }
   const installApp = async () => {
     if (!installPrompt) return
@@ -190,9 +347,9 @@ function App() {
               <aside className="chat-panel">
                 <div className="chat-header"><div><MessageCircle size={17} /><strong>Live chat</strong></div><span>COMMUNITY</span></div>
                 <div className="chat-notice">Be respectful. Keep the conversation welcoming.</div>
-                <div className="chat-feed">{chatMessages.map((item, index) => <div className="chat-line" key={`${item.name}-${index}`}><strong className={item.name === 'you' ? 'chat-you' : ''}>{item.name}</strong><span>{item.message}</span></div>)}</div>
-                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} placeholder="Send a message..." aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!chatMessage.trim()}><Send size={16} /></button></form>
-                <div className="chat-footer">Guest mode · chat is local preview only</div>
+                <div className="chat-feed">{chatMessages.map((item) => <div className="chat-line" key={item.id}><strong>{item.display_name}</strong><span>{item.body}</span>{canModerateChat && <div className="chat-mod-actions" style={{ display: 'flex', gap: 4, marginLeft: 'auto', flexWrap: 'wrap' }}><button type="button" disabled={!!moderationBusy} onClick={() => void removeChatMessage(item.id)} aria-label="Delete message" title="Delete message">Delete</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void moderateChatUser(item.user_id, 'mute')}>Mute 10m</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void moderateChatUser(item.user_id, 'ban')}>Ban 1h</button><button type="button" disabled={!!moderationBusy || item.user_id === creatorUser?.id} onClick={() => void clearChatRestriction(item.user_id)}>Unrestrict</button></div>}</div>)}</div>
+                <form className="chat-compose" onSubmit={(event) => { event.preventDefault(); void sendChat() }}><input value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} maxLength={500} disabled={!canUseChat} placeholder={canUseChat ? "Sign in to join the conversation…" : "Chat unavailable in preview mode"} aria-label="Chat message" /><button type="submit" aria-label="Send chat message" disabled={!canUseChat || !chatMessage.trim() || chatSending}><Send size={16} /></button></form>
+                <div className="chat-footer" role="status">{chatStatus || 'Live connection · 500 character limit'}</div>
               </aside>
             </div>
           </section>

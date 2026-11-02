@@ -37,6 +37,7 @@ pub struct AppState {
     pub allowed_origins: Arc<Vec<String>>,
     pub(crate) signal_rooms: Arc<Mutex<HashMap<Uuid, SignalRoom>>>,
     pub(crate) signal_tickets: Arc<Mutex<HashMap<String, SignalTicket>>>,
+    pub(crate) chat_rooms: Arc<Mutex<HashMap<Uuid, broadcast::Sender<String>>>>,
 }
 
 impl AppState {

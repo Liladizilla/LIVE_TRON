@@ -204,6 +204,128 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50, default: 24 }
       responses:
         "200": { description: Live public non-mature streams }
+  /v1/streams/{stream_id}/chat:
+    parameters:
+      - in: path
+        name: stream_id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read recent messages for a live stream
+      description: Returns up to 100 newest messages in chronological order. Private streams are visible only to their owner.
+      parameters:
+        - in: query
+          name: before
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { description: Chat messages }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Send a chat message to a live stream
+      description: Requires an account. Message body is trimmed, limited to 500 characters, and rate limited to five messages per user per stream every ten seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "201": { description: Persisted chat message }
+        "400": { description: Empty or oversized message }
+        "401": { description: Missing or invalid access token }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+        "429": { description: Chat rate limit exceeded }
+  /v1/streams/{stream_id}/chat-ticket:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create a one-use ticket for live chat WebSocket access
+      description: Tickets are bound to the authenticated user and stream, expire after 60 seconds, and are consumed during the WebSocket handshake.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Short-lived chat ticket }
+        "401": { description: Authentication required }
+        "404": { description: Stream not found or not accessible }
+        "409": { description: Stream is not live }
+  /v1/streams/{stream_id}/chat-socket:
+    get:
+      summary: Connect to live chat events
+      description: WebSocket endpoint. The client must offer live-tron.chat.v1 and live-tron.chat.ticket.{ticket} subprotocols. The server emits ready, message, and resync_required events. Browser Origin must be allowlisted.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "101": { description: WebSocket upgrade accepted }
+        "401": { description: Missing, expired, or consumed ticket }
+        "403": { description: Origin is not allowed }
+  /v1/streams/{stream_id}/chat-restrictions/{user_id}:
+    parameters:
+      - in: path
+        name: stream_id
+        required: true
+        schema: { type: string, format: uuid }
+      - in: path
+        name: user_id
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      security: [{ bearerAuth: [] }]
+      summary: Mute or ban a chat participant
+      description: Stream owner only. Restrictions last from 1 second to 24 hours. A ban blocks chat sending but does not block stream playback.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, duration_seconds]
+              properties:
+                kind: { type: string, enum: [mute, ban] }
+                duration_seconds: { type: integer, minimum: 1, maximum: 86400 }
+                reason: { type: string, maxLength: 240 }
+      responses:
+        "204": { description: Restriction applied }
+        "400": { description: Invalid restriction }
+        "403": { description: Stream owner permission required }
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Remove a chat restriction
+      description: Stream owner only.
+      responses:
+        "204": { description: Restriction removed }
+        "403": { description: Stream owner permission required }
+  /v1/streams/{stream_id}/chat-messages/{message_id}:
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Delete a chat message
+      description: Stream owner only. Connected chat clients receive a message_deleted event.
+      parameters:
+        - in: path
+          name: stream_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: message_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Message deleted }
+        "403": { description: Stream owner permission required }
+        "404": { description: Message not found }
   /internal/v1/media/events:
     post:
       summary: Trusted MediaMTX online/offline lifecycle callback

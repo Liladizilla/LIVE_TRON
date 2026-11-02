@@ -175,3 +175,8 @@ Migrations do not drop tables or cascade-delete application data.
 ## Project status
 
 This repository is the source of truth for LIVE_TRON. Features marked as preview/local are not backed by a production API. The media plane is not connected. Stream status changes to live only after a trusted internal ingest event. The current internal event callback, publishing-key authorization endpoint, and WebSocket signaling relay are integration boundaries, not an SFU. Signaling rooms are in-process and single-instance only. No video is ingested, routed, or played back by this release.
+
+
+## Chat scaling boundary
+
+The chat WebSocket uses a separate endpoint and 60-second one-use tickets. Ticket plaintext is returned once; PostgreSQL stores only its SHA-256 digest, and an atomic DELETE ... RETURNING consumes it across API replicas. Chat message, deletion, and resync events use PostgreSQL LISTEN/NOTIFY so every API process can fan out to its own connected sockets. If a listener reconnects, local sockets receive resync_required and clients reload durable history. PostgreSQL notifications are transient, not a durable event queue; chat history remains the source of truth. The WebSocket signaling relay is still process-local and remains a separate horizontal-scaling blocker.

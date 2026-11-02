@@ -267,6 +267,7 @@ export function toDiscoveryStream(stream: ApiStream): Stream {
 
   return {
     id: stream.id,
+    channelId: stream.channel_id,
     title: stream.title,
     creator,
     handle,
@@ -278,4 +279,81 @@ export function toDiscoveryStream(stream: ApiStream): Stream {
     duration: 'LIVE',
     description: `Live broadcast from ${creator}.`,
   }
+}
+
+export type ApiChatMessage = {
+  id: string
+  stream_id: string
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  body: string
+  created_at: string
+}
+
+export async function fetchStreamChat(streamId: string, signal?: AbortSignal): Promise<ApiChatMessage[]> {
+  return authenticatedRequest<ApiChatMessage[]>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat?limit=60`,
+    { signal },
+  )
+}
+
+export async function sendStreamChatMessage(streamId: string, body: string): Promise<ApiChatMessage> {
+  return authenticatedRequest<ApiChatMessage>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat`,
+    { method: 'POST', body: JSON.stringify({ body }) },
+  )
+}
+
+export async function connectStreamChatSocket(streamId: string): Promise<WebSocket> {
+  const ticket = await authenticatedRequest<{ ticket: string }>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-ticket`,
+    { method: 'POST' },
+  )
+  const socketUrl = new URL(endpoint(`/v1/streams/${encodeURIComponent(streamId)}/chat-socket`))
+  socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+  const socket = new WebSocket(socketUrl, [
+    'live-tron.chat.v1',
+    `live-tron.chat.ticket.${ticket.ticket}`,
+  ])
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      socket.close()
+      reject(new Error('Live chat connection timed out.'))
+    }, 8000)
+    socket.addEventListener('open', () => {
+      window.clearTimeout(timeout)
+      resolve()
+    }, { once: true })
+    socket.addEventListener('error', () => {
+      window.clearTimeout(timeout)
+      reject(new Error('Unable to connect to live chat.'))
+    }, { once: true })
+  })
+  return socket
+}
+
+export async function setStreamChatRestriction(
+  streamId: string,
+  userId: string,
+  input: { kind: 'mute' | 'ban'; duration_seconds: number; reason?: string },
+): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-restrictions/${encodeURIComponent(userId)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  )
+}
+
+export async function removeStreamChatRestriction(streamId: string, userId: string): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-restrictions/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function deleteStreamChatMessage(streamId: string, messageId: string): Promise<void> {
+  await authenticatedRequest<void>(
+    `/v1/streams/${encodeURIComponent(streamId)}/chat-messages/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' },
+  )
 }

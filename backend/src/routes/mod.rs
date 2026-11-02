@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod channels;
+pub mod chat;
 mod health;
 mod media_auth;
 mod meta;
@@ -44,6 +45,23 @@ pub fn router() -> Router<AppState> {
             get(streams::list_for_channel).post(streams::create),
         )
         .route("/v1/streams", get(streams::discover))
+        .route(
+            "/v1/streams/{stream_id}/chat",
+            get(chat::history).post(chat::send),
+        )
+        .route(
+            "/v1/streams/{stream_id}/chat-ticket",
+            post(chat::create_ticket),
+        )
+        .route("/v1/streams/{stream_id}/chat-socket", get(chat::connect))
+        .route(
+            "/v1/streams/{stream_id}/chat-restrictions/{user_id}",
+            axum::routing::put(chat::set_restriction).delete(chat::remove_restriction),
+        )
+        .route(
+            "/v1/streams/{stream_id}/chat-messages/{message_id}",
+            axum::routing::delete(chat::delete_message),
+        )
         .route("/v1/media/ice-config", get(signaling::ice_config))
         .route(
             "/v1/streams/{stream_id}/media-token",

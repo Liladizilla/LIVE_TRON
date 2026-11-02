@@ -3,8 +3,9 @@ name: LIVE_TRON CI
 on:
   push:
     branches: [main, develop, 'feat/**', 'test/**']
+  # Run checks for every PR target. Feature branches may target fix/* branches
+  # while dependent work is still under review (for example PR #17 -> PR #16).
   pull_request:
-    branches: [main, develop, 'feat/**', 'test/**']
 
 permissions:
   contents: read
