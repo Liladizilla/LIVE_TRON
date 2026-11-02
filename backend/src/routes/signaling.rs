@@ -1,5 +1,5 @@
 use super::auth::{authenticated_user, ApiError};
-use crate::state::{AppState, SignalRoom, SignalTicket};
+use crate::state::{AppState, SignalRoom};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -32,7 +32,6 @@ use uuid::Uuid;
 const MAX_SIGNAL_BYTES: usize = 16 * 1024;
 const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
 const SIGNAL_TICKET_TTL_SECONDS: u64 = 60;
-const MAX_SIGNAL_TICKETS: usize = 10_000;
 const MAX_ROOM_PARTICIPANTS: usize = 256;
 const MAX_SIGNAL_MESSAGES_PER_SECOND: u32 = 60;
 const SIGNAL_TICKET_PROTOCOL_PREFIX: &str = "live-tron.ticket.";
@@ -188,14 +187,6 @@ pub async fn create_ticket(
     OsRng.fill_bytes(&mut bytes);
     let ticket = hex::encode(bytes);
     let ticket_hash = credential_hash(&ticket);
-    let mut tickets = state.signal_tickets.lock().await;
-    tickets.retain(|_, existing| existing.expires_at > Instant::now());
-    if tickets.len() >= MAX_SIGNAL_TICKETS {
-        return Err(ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "signal_ticket_capacity_reached",
-        ));
-    }
     let authorization = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -208,16 +199,22 @@ pub async fn create_ticket(
     } else {
         (None, Some(authenticated_user(&headers, &state)?))
     };
-    tickets.insert(
-        ticket_hash,
-        SignalTicket {
-            stream_id,
-            publisher: role.is_publisher(),
-            publisher_key_hash,
-            viewer_user_id,
-            expires_at: Instant::now() + Duration::from_secs(SIGNAL_TICKET_TTL_SECONDS),
-        },
-    );
+    sqlx::query("DELETE FROM signal_ws_tickets WHERE expires_at <= now()")
+        .execute(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_ticket_cleanup_failed"))?;
+    sqlx::query(
+        "INSERT INTO signal_ws_tickets (ticket_hash, stream_id, publisher, publisher_key_hash, viewer_user_id, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6::double precision * interval '1 second'))",
+    )
+    .bind(ticket_hash)
+    .bind(stream_id)
+    .bind(role.is_publisher())
+    .bind(publisher_key_hash)
+    .bind(viewer_user_id)
+    .bind(SIGNAL_TICKET_TTL_SECONDS as f64)
+    .execute(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_ticket_create_failed"))?;
     Ok(Json(SignalTicketResponse {
         ticket: ticket.clone(),
         expires_in: SIGNAL_TICKET_TTL_SECONDS,
@@ -253,28 +250,32 @@ pub async fn connect(
             StatusCode::UNAUTHORIZED,
             "missing_or_invalid_signal_ticket",
         ))?;
+    let db = state.db.as_ref().ok_or(ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "database_unavailable",
+    ))?;
+    // DELETE ... RETURNING consumes a one-use ticket atomically across API replicas.
+    // Only its SHA-256 digest is stored; the bearer value is never persisted.
     let ticket_hash = credential_hash(ticket);
-    let ticket_record = state
-        .signal_tickets
-        .lock()
-        .await
-        .remove(&ticket_hash)
-        .ok_or(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "signal_ticket_expired_or_used",
-        ))?;
-    if ticket_record.stream_id != stream_id || ticket_record.expires_at <= Instant::now() {
+    let ticket_record = sqlx::query_as::<_, (Uuid, bool, Option<String>, Option<Uuid>)>(
+        "DELETE FROM signal_ws_tickets WHERE ticket_hash = $1 AND expires_at > now() RETURNING stream_id, publisher, publisher_key_hash, viewer_user_id",
+    )
+    .bind(ticket_hash)
+    .fetch_optional(db)
+    .await
+    .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_ticket_consume_failed"))?
+    .ok_or(ApiError(
+        StatusCode::UNAUTHORIZED,
+        "signal_ticket_expired_or_used",
+    ))?;
+    if ticket_record.0 != stream_id {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
             "signal_ticket_expired_or_used",
         ));
     }
-    let db = state.db.as_ref().ok_or(ApiError(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "database_unavailable",
-    ))?;
-    let still_authorized = if ticket_record.publisher {
-        let Some(key_hash) = ticket_record.publisher_key_hash.as_deref() else {
+    let still_authorized = if ticket_record.1 {
+        let Some(key_hash) = ticket_record.2.as_deref() else {
             return Err(ApiError(
                 StatusCode::UNAUTHORIZED,
                 "signal_ticket_expired_or_used",
@@ -289,7 +290,7 @@ pub async fn connect(
         .await
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_authorization_failed"))?
     } else {
-        let Some(viewer_id) = ticket_record.viewer_user_id else {
+        let Some(viewer_id) = ticket_record.3 else {
             return Err(ApiError(
                 StatusCode::UNAUTHORIZED,
                 "signal_ticket_expired_or_used",
@@ -323,7 +324,7 @@ pub async fn connect(
             "signal_ticket_access_revoked",
         ));
     }
-    let role = if ticket_record.publisher {
+    let role = if ticket_record.1 {
         PeerRole::Publisher
     } else {
         PeerRole::Viewer
