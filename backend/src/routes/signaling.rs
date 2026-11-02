@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{postgres::PgListener, PgPool};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -34,6 +34,8 @@ const TURN_CREDENTIAL_TTL_SECONDS: i64 = 3600;
 const SIGNAL_TICKET_TTL_SECONDS: u64 = 60;
 const MAX_ROOM_PARTICIPANTS: usize = 256;
 const MAX_SIGNAL_MESSAGES_PER_SECOND: u32 = 60;
+const SIGNAL_PEER_LEASE_SECONDS: i64 = 45;
+const SIGNAL_PEER_HEARTBEAT_SECONDS: u64 = 15;
 const SIGNAL_TICKET_PROTOCOL_PREFIX: &str = "live-tron.ticket.";
 type HmacSha1 = Hmac<Sha1>;
 
@@ -335,6 +337,27 @@ pub async fn connect(
         PeerRole::Viewer
     };
     let participant_id = Uuid::new_v4();
+    // A database lease makes peer presence visible across API replicas. The
+    // partial unique index in migration 0009 guarantees one publisher per stream.
+    sqlx::query("DELETE FROM signal_peer_leases WHERE expires_at <= now()")
+        .execute(db)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_cleanup_failed"))?;
+    let lease_result = sqlx::query(
+        "INSERT INTO signal_peer_leases (participant_id, stream_id, publisher, expires_at) VALUES ($1, $2, $3, now() + ($4::double precision * interval '1 second'))",
+    )
+    .bind(participant_id)
+    .bind(stream_id)
+    .bind(role.is_publisher())
+    .bind(SIGNAL_PEER_LEASE_SECONDS as f64)
+    .execute(db)
+    .await;
+    if let Err(error) = lease_result {
+        if error.as_database_error().is_some_and(|db_error| db_error.code().as_deref() == Some("23505")) {
+            return Err(ApiError(StatusCode::CONFLICT, "publisher_already_connected"));
+        }
+        return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, "signal_peer_reservation_failed"));
+    }
     let mut rooms = state.signal_rooms.lock().await;
     let room = rooms.entry(stream_id).or_insert_with(|| {
         let (sender, _) = broadcast::channel(64);
@@ -460,9 +483,25 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
     let mut signal_count = 0_u32;
     let joined = peer_joined_event(participant_id, role);
     let _ = room_sender.send(joined.to_string());
+    publish_signal_event(&state, stream_id, joined).await;
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(SIGNAL_PEER_HEARTBEAT_SECONDS));
 
     loop {
         tokio::select! {
+            _ = heartbeat.tick() => {
+                let Some(db) = state.db.as_ref() else { break };
+                let refreshed = sqlx::query(
+                    "UPDATE signal_peer_leases SET expires_at = now() + ($2::double precision * interval '1 second') WHERE participant_id = $1",
+                )
+                .bind(participant_id)
+                .bind(SIGNAL_PEER_LEASE_SECONDS as f64)
+                .execute(db)
+                .await;
+                if refreshed.map(|result| result.rows_affected() == 0).unwrap_or(true) {
+                    tracing::warn!(%stream_id, %participant_id, "signaling peer lease could not be refreshed");
+                    break;
+                }
+            }
             incoming_message = incoming.next() => {
                 let Some(Ok(message)) = incoming_message else { break };
                 match message {
@@ -490,11 +529,15 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                             let _ = outgoing.send(Message::Text(json!({"type":"error","error":"signal_type_or_payload_rejected"}).to_string().into())).await;
                             continue;
                         }
-                        let target_is_valid = {
-                            let rooms = state.signal_rooms.lock().await;
-                            rooms.get(&stream_id).and_then(|room| room.participants.get(&signal.to))
-                                .is_some_and(|target_is_publisher| *target_is_publisher != role.is_publisher())
-                        };
+                        let target_is_valid = sqlx::query_scalar::<_, bool>(
+                            "SELECT EXISTS(SELECT 1 FROM signal_peer_leases WHERE participant_id = $1 AND stream_id = $2 AND expires_at > now() AND publisher <> $3)",
+                        )
+                        .bind(signal.to)
+                        .bind(stream_id)
+                        .bind(role.is_publisher())
+                        .fetch_one(state.db.as_ref().expect("signaling requires a database"))
+                        .await
+                        .unwrap_or(false);
                         if !target_is_valid || signal.to == participant_id {
                             let _ = outgoing.send(Message::Text(json!({"type":"error","error":"invalid_signal_recipient"}).to_string().into())).await;
                             continue;
@@ -506,7 +549,9 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
                             "role": role.as_str(),
                             "payload": signal.payload
                         });
-                        let _ = room_sender.send(envelope.to_string());
+                        let payload = envelope.to_string();
+                        let _ = room_sender.send(payload.clone());
+                        publish_signal_event(&state, stream_id, envelope).await;
                     }
                     Message::Ping(payload) => {
                         if outgoing.send(Message::Pong(payload)).await.is_err() { break; }
@@ -544,7 +589,75 @@ async fn handle_socket(socket: WebSocket, context: SocketContext) {
         "role": role.as_str()
     });
     let _ = room_sender.send(left.to_string());
+    publish_signal_event(&state, stream_id, left).await;
     cleanup_participant(&state, stream_id, participant_id, role).await;
+}
+
+async fn publish_signal_event(state: &AppState, stream_id: Uuid, event: Value) {
+    let Some(db) = state.db.as_ref() else { return };
+    let payload = json!({"stream_id": stream_id, "event": event}).to_string();
+    if let Err(error) = sqlx::query("SELECT pg_notify('live_tron_signal', $1)")
+        .bind(payload)
+        .execute(db)
+        .await
+    {
+        tracing::warn!(%stream_id, %error, "could not publish signaling notification");
+    }
+}
+
+/// Every API replica subscribes to the same signaling channel and forwards
+/// notifications only to sockets connected to that replica.
+pub fn start_signal_listener(state: AppState) {
+    let Some(db) = state.db.clone() else { return };
+    tokio::spawn(async move {
+        loop {
+            let mut listener = match PgListener::connect_with(&db).await {
+                Ok(listener) => listener,
+                Err(error) => {
+                    tracing::error!(%error, "signaling listener connection failed");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            if let Err(error) = listener.listen("live_tron_signal").await {
+                tracing::error!(%error, "signaling listener subscription failed");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+            tracing::info!("subscribed to PostgreSQL signaling notifications");
+            {
+                let rooms = state.signal_rooms.lock().await;
+                for (stream_id, room) in rooms.iter() {
+                    let _ = room.sender.send(json!({
+                        "type": "resync_required",
+                        "stream_id": stream_id
+                    }).to_string());
+                }
+            }
+            loop {
+                match listener.recv().await {
+                    Ok(notification) => {
+                        let Ok(value) = serde_json::from_str::<Value>(notification.payload()) else {
+                            tracing::warn!("discarding malformed signaling notification");
+                            continue;
+                        };
+                        let Some(stream_id) = value.get("stream_id").and_then(Value::as_str)
+                            .and_then(|value| Uuid::parse_str(value).ok()) else { continue };
+                        let Some(event) = value.get("event") else { continue };
+                        let rooms = state.signal_rooms.lock().await;
+                        if let Some(room) = rooms.get(&stream_id) {
+                            let _ = room.sender.send(event.to_string());
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "signaling listener disconnected; reconnecting");
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
 }
 
 fn create_turn_credential(
@@ -609,6 +722,15 @@ async fn cleanup_participant(
     participant_id: Uuid,
     role: PeerRole,
 ) {
+    if let Some(db) = state.db.as_ref() {
+        if let Err(error) = sqlx::query("DELETE FROM signal_peer_leases WHERE participant_id = $1")
+            .bind(participant_id)
+            .execute(db)
+            .await
+        {
+            tracing::warn!(%stream_id, %participant_id, %error, "could not release signaling peer lease");
+        }
+    }
     let mut rooms = state.signal_rooms.lock().await;
     if let Some(room) = rooms.get_mut(&stream_id) {
         room.participants.remove(&participant_id);
