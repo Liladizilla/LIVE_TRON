@@ -1079,6 +1079,25 @@ mod tests {
             .expect("API replica B did not subscribe")
             .expect("API replica B readiness channel closed");
 
+        // Listener startup broadcasts resync_required to existing local rooms.
+        // Drain that intentional startup event before asserting the published event.
+        let startup_a = tokio::time::timeout(Duration::from_secs(3), receiver_a.recv())
+            .await
+            .expect("replica A did not receive startup resync")
+            .expect("replica A startup room closed");
+        let startup_b = tokio::time::timeout(Duration::from_secs(3), receiver_b.recv())
+            .await
+            .expect("replica B did not receive startup resync")
+            .expect("replica B startup room closed");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&startup_a).unwrap()["type"],
+            "resync_required"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&startup_b).unwrap()["type"],
+            "resync_required"
+        );
+
         let event = serde_json::json!({
             "type": "peer_joined",
             "from": Uuid::new_v4(),
